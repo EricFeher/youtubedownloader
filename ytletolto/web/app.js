@@ -11,7 +11,7 @@ const el = {
   thumb: $("thumb"), badge: $("badge"), duration: $("duration"),
   kind: $("preview-kind"), title: $("title"), uploader: $("uploader"),
   batch: $("batch"), batchCount: $("batch-count"), batchList: $("batch-list"), batchClear: $("batch-clear"),
-  videoOptions: $("video-options"), audioOptions: $("audio-options"),
+  videoOptions: $("video-options"), audioOptions: $("audio-options"), quality: $("quality"),
   containerHint: $("container-hint"), audioFormatHint: $("audio-format-hint"), compatibleRow: $("compatible-row"),
   compatible: $("compatible"), playlistRow: $("playlist-row"), playlist: $("playlist"),
   folder: $("folder"), chooseFolder: $("choose-folder"), openFolder: $("open-folder"),
@@ -25,7 +25,8 @@ const el = {
 };
 
 const state = {
-  probeToken: 0, probedUrl: "", probeInfo: null, maxHeight: null, isPlaylist: false,
+  probeToken: 0, probedUrl: "", probeInfo: null, isPlaylist: false,
+  quality: "best", // a felhasználó mentett választása; a kijelölt chip ehhez a legközelebbi elérhető
   batch: [], // több beillesztett link, amíg sorba nem kerülnek
   queueVersion: -1, items: new Map(),
   playlistToken: 0, playlistUrl: "", entries: [], itemModes: new Map(), excludedItems: new Set(),
@@ -61,6 +62,17 @@ function heightLabel(h) {
   return `${h}p`;
 }
 
+function tierLabel(tier, fps) {
+  const name = tier >= 4320 ? "8K" : tier >= 2160 ? "4K" : `${tier}p`;
+  return fps > 30 ? `${name}${fps}` : name;
+}
+
+function formatSize(bytes) {
+  if (!bytes) return "";
+  const mb = bytes / 1024 ** 2;
+  return mb >= 1024 ? `~${(mb / 1024).toFixed(1)} GB` : `~${Math.max(1, Math.round(mb))} MB`;
+}
+
 const cssUrl = (url) => (url ? `url("${url.replace(/"/g, "%22")}")` : "");
 
 const looksLikeUrl = (text) => /^(https?:\/\/)?([\w-]+\.)*(youtube\.com|youtu\.be|youtube-nocookie\.com)\//i.test(text.trim())
@@ -90,8 +102,6 @@ function resetLinkState() {
   el.playlistRow.hidden = true;
   el.playlist.checked = false;
   state.isPlaylist = false;
-  state.maxHeight = null;
-  updateQualityLimits(null);
   clearPlaylist();
 }
 
@@ -151,8 +161,7 @@ function showPreview(info, url) {
   }
   state.probeInfo = info;
   state.isPlaylist = info.kind === "playlist";
-  state.maxHeight = info.kind === "video" ? info.max_height : null;
-  updateQualityLimits(state.maxHeight);
+  renderQualities();
   el.preview.hidden = false;
   applyMode();
 }
@@ -334,13 +343,62 @@ el.playlist.addEventListener("change", () => {
   }
 });
 
-// A videónál nem elérhető felbontások letiltása.
-function updateQualityLimits(maxHeight) {
-  for (const radio of radios("quality")) {
-    if (radio.value === "best") continue;
-    radio.disabled = Boolean(maxHeight) && Number(radio.value) > maxHeight;
+// --- Minőség -----------------------------------------------------------------
+
+// Előnézet nélkül, lejátszási listánál és több linknél nincs videónkénti lista, ott ezek közül lehet választani.
+const FALLBACK_TIERS = [2160, 1440, 1080, 720, 480, 360];
+const MIN_TIER = 360; // ennél kisebbet csak akkor kínálunk, ha a videó eleve ilyen kicsi
+
+// A Python quality_key() párja.
+function qualityKey() {
+  const container = radioValue("container");
+  return el.compatible.checked && container !== "webm" ? `${container}-compatible` : container;
+}
+
+// A videónál a választott formátumban ténylegesen letölthető fokozatok, csökkenő sorrendben; null, ha nem ismertek.
+function availableQualities() {
+  const info = state.probeInfo;
+  if (info?.kind !== "video" || (!el.playlistRow.hidden && el.playlist.checked)) return null;
+  const list = info.qualities?.[qualityKey()];
+  return list?.length ? list : null;
+}
+
+function qualityChips() {
+  const available = availableQualities();
+  if (!available) {
+    return [{ value: "best", label: "Legjobb", tier: Infinity }, ...FALLBACK_TIERS.map((tier) => ({ value: String(tier), label: tierLabel(tier), tier }))];
   }
-  if (radios("quality").find((r) => r.checked)?.disabled) setRadio("quality", "best");
+  // A legfelső fokozat maga a "Legjobb": külön chipként ugyanazt jelentené.
+  const [top, ...rest] = available;
+  const shown = top.tier > MIN_TIER ? rest.filter((q) => q.tier >= MIN_TIER) : rest;
+  return [
+    { value: "best", label: `Legjobb · ${tierLabel(top.tier, top.fps)}`, size: top.size, tier: top.tier },
+    ...shown.map((q) => ({ value: String(q.tier), label: tierLabel(q.tier, q.fps), size: q.size, tier: q.tier })),
+  ];
+}
+
+function qualityChip({ value, label, size }) {
+  const input = Object.assign(document.createElement("input"), { type: "radio", name: "quality", value });
+  const text = document.createElement("span");
+  text.textContent = label;
+  if (size) {
+    const small = document.createElement("small");
+    small.textContent = formatSize(size);
+    small.title = "Becsült fájlméret";
+    text.append(small);
+  }
+  const chip = document.createElement("label");
+  chip.append(input, text);
+  return chip;
+}
+
+function renderQualities() {
+  const chips = qualityChips();
+  const wanted = state.quality === "best" ? Infinity : Number(state.quality) || Infinity;
+  // A mentett választáshoz legközelebbi: a legnagyobb, ami nem több nála; ha mind több, a legkisebb.
+  const selected = chips.find((c) => c.tier <= wanted) ?? chips.at(-1);
+  el.quality.replaceChildren(...chips.map(qualityChip));
+  setRadio("quality", selected.value);
 }
 
 // --- Több link egyszerre -----------------------------------------------------
@@ -461,6 +519,7 @@ function applyMode() {
   el.containerHint.textContent = container.hint;
   el.audioFormatHint.textContent = audioFormat.hint;
   el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
+  renderQualities(); // a fokozatok formátumonként mások (pl. kompatibilis módban legfeljebb 1080p)
   el.download.disabled = loading() || (perItem && counts.video + counts.audio === 0);
   el.download.querySelector("#download-label").textContent = perItem
     ? `${counts.video + counts.audio} elem letöltése`
@@ -480,8 +539,16 @@ radios("audio_format").forEach((r) => r.addEventListener("change", () => {
   applyMode();
   saveSettings({ audio_format: radioValue("audio_format") });
 }));
-radios("quality").forEach((r) => r.addEventListener("change", () => saveSettings({ quality: radioValue("quality") })));
-el.compatible.addEventListener("change", () => saveSettings({ compatible: el.compatible.checked }));
+// A chipek újrarajzolódnak, ezért a konténeren figyeljük; csak a felhasználó kattintása módosítja a választást.
+el.quality.addEventListener("change", () => {
+  state.quality = radioValue("quality");
+  saveSettings({ quality: state.quality });
+});
+el.compatible.addEventListener("change", () => {
+  renderQualities();
+  saveSettings({ compatible: el.compatible.checked });
+});
+el.playlist.addEventListener("change", renderQualities); // a teljes listánál nincs videónkénti lista
 
 function showFolder(path) {
   // A mező jobbról balra vág (az útvonal vége a fontos); az LRM jelek tartják a helyén a perjeleket.
@@ -574,7 +641,7 @@ function formatLabel(item) {
     parts.push(AUDIO_FORMATS[item.audio_format]?.label ?? item.audio_format);
   } else {
     parts.push(CONTAINERS[item.container]?.label ?? item.container);
-    if (item.max_height) parts.push(item.max_height >= 2160 ? "4K" : `${item.max_height}p`);
+    if (item.max_height) parts.push(tierLabel(item.max_height));
     if (item.compatible && item.container !== "webm") parts.push("kompatibilis");
   }
   if (item.playlist) parts.push("lista");
@@ -747,10 +814,12 @@ window.app = { onEvent: (e) => handlers[e.type]?.(e) };
 
 // --- Indulás -----------------------------------------------------------------
 
+renderQualities(); // amíg a mentett beállítások meg nem érkeznek
+
 window.addEventListener("pywebviewready", async () => {
   const { settings, ffmpeg, js_runtime, queue } = await api().init();
   setRadio("mode", settings.mode);
-  setRadio("quality", settings.quality);
+  state.quality = settings.quality;
   setRadio("container", CONTAINERS[settings.container] ? settings.container : "mp4");
   setRadio("audio_format", AUDIO_FORMATS[settings.audio_format] ? settings.audio_format : "mp3");
   el.compatible.checked = settings.compatible;

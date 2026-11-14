@@ -24,6 +24,7 @@ def settings_path() -> Path:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    # A korábbi mappanév őrzi meg a már elmentett felhasználói beállításokat.
     return base / "YTLetolto" / "settings.json"
 
 

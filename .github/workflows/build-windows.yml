@@ -34,7 +34,7 @@ jobs:
       - name: Check bundled ffmpeg and Deno
         shell: pwsh
         run: |
-          foreach ($exe in "dist\YTLetolto\YTLetolto.exe", "dist\YTLetolto.exe") {
+          foreach ($exe in "dist\Media Minds Downloader\Media Minds Downloader.exe", "dist\Media Minds Downloader.exe") {
             $p = Start-Process $exe -ArgumentList "--check", "$PWD\check.txt" -Wait -PassThru
             Get-Content check.txt
             if ($p.ExitCode -ne 0) { throw "$exe --check failed" }
@@ -42,19 +42,19 @@ jobs:
 
       - name: Package
         shell: pwsh
-        run: Compress-Archive -Path dist\YTLetolto -DestinationPath YTLetolto-windows.zip
+        run: Compress-Archive -Path "dist\Media Minds Downloader" -DestinationPath MediaMindsDownloader-windows.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: YTLetolto-windows
+          name: MediaMindsDownloader-windows
           path: |
-            YTLetolto-windows.zip
-            dist/YTLetolto.exe
+            MediaMindsDownloader-windows.zip
+            dist/Media Minds Downloader.exe
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            YTLetolto-windows.zip
-            dist/YTLetolto.exe
+            MediaMindsDownloader-windows.zip
+            dist/Media Minds Downloader.exe

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from ytletolto.downloader import (
     Downloader,
     DownloadRequest,
@@ -36,6 +38,35 @@ def test_video_height_cap_and_compat_mode():
     opts = build_ydl_opts(request(max_height=1080, compatible=True), TOOLS)
 
     assert opts["format_sort"] == ["hdr:sdr", "vcodec:h264", "res:1080"]
+
+
+def test_mkv_takes_best_audio_of_any_codec():
+    opts = build_ydl_opts(request(container="mkv"), TOOLS)
+
+    assert opts["format"] == "bestvideo+bestaudio/best"
+    assert opts["merge_output_format"] == "mkv"
+    assert "EmbedThumbnail" in pp_keys(opts)
+
+
+def test_mkv_compat_mode_keeps_aac():
+    opts = build_ydl_opts(request(container="mkv", compatible=True), TOOLS)
+
+    assert opts["format"].startswith("bestvideo+bestaudio[acodec^=mp4a]")
+    assert "vcodec:h264" in opts["format_sort"]
+
+
+def test_webm_prefers_webm_streams_and_falls_back_to_mkv():
+    opts = build_ydl_opts(request(container="webm", compatible=True, max_height=720), TOOLS)
+
+    assert opts["format"].startswith("bestvideo[ext=webm]+bestaudio[ext=webm]")
+    assert opts["merge_output_format"] == "webm/mkv"
+    assert opts["format_sort"] == ["hdr:sdr", "res:720"]  # H.264 nem fér WebM-be
+    assert "EmbedThumbnail" not in pp_keys(opts)  # a yt-dlp WebM-be nem tud borítót tenni
+
+
+def test_unknown_container_is_rejected():
+    with pytest.raises(ValueError):
+        build_ydl_opts(request(container="avi"), TOOLS)
 
 
 def test_audio_extracts_320k_mp3():

@@ -12,6 +12,7 @@ DEFAULTS: dict = {
     "mode": "video",
     "quality": "best",
     "compatible": False,
+    "container": "mp4",
 }
 
 

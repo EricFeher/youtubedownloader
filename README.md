@@ -1,16 +1,18 @@
 # YT Letöltő
 
-Asztali alkalmazás YouTube-videók letöltéséhez **MP4 videóként** vagy **MP3 hangként**, a lehető legjobb minőségben.
+Asztali alkalmazás YouTube-videók letöltéséhez **videóként** (MP4, MKV vagy WebM) vagy **MP3 hangként**, a lehető legjobb minőségben.
 Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete egy modern weboldalt idéz.
 
 - **Videó (MP4)**: a legjobb elérhető képminőség (akár 4K/60 fps) a legjobb hangsávval összefűzve.
   Választható felbontáskorlát (2160p…480p).
+- **Videó fájlformátum**: MP4 (alapértelmezett, mindenhol lejátszható), MKV (bármilyen kodek, a legjobb
+  Opus hangsávval) vagy WebM (VP9/AV1 + Opus; ha egy videónál nincs ilyen sáv, MKV lesz belőle, borítókép nélkül).
 - **Kompatibilis mód**: H.264 + AAC, ami minden lejátszón és tévén megy, de a YouTube-on legfeljebb 1080p.
   Kapcsold be, ha egy régebbi lejátszó nem játssza le a legjobb minőségű (VP9/AV1) fájlt.
 - **Csak hang (MP3)**: a legjobb hangsávból 320 kbps MP3, borítóképpel és metaadatokkal (cím, előadó).
 - Link beillesztése után előnézet: borítókép, cím, csatorna, hossz és a legjobb elérhető felbontás.
 - Lejátszási lista letöltése, folyamatjelző sebességgel és hátralévő idővel, megszakítás.
-- Megjegyzi a mentési mappát és az utoljára választott formátumot.
+- Megjegyzi a mentési mappát és az utoljára választott beállításokat.
 - A MediaMinds arculatában készült: sötét felület, zöld színátmenet, Outfit betűtípus és MediaMinds logó.
 
 ## Használat Windows-on

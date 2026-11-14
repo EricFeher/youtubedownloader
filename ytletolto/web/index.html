@@ -59,7 +59,7 @@
           <input type="radio" name="mode" value="video" checked>
           <span class="format-box">
             <span class="format-icon"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="15" height="14" rx="3"/><path d="m17 10 5-3v10l-5-3"/></svg></span>
-            <span><strong>Videó</strong><small>MP4 · akár 4K</small></span>
+            <span><strong>Videó</strong><small>MP4, MKV, WebM · akár 4K</small></span>
           </span>
         </label>
         <label class="format-option">
@@ -72,6 +72,14 @@
       </div>
 
       <div id="video-options">
+        <h3 class="card-title">Fájlformátum</h3>
+        <div class="chips" role="radiogroup" id="container">
+          <label><input type="radio" name="container" value="mp4" checked><span>MP4</span></label>
+          <label><input type="radio" name="container" value="mkv"><span>MKV</span></label>
+          <label><input type="radio" name="container" value="webm"><span>WebM</span></label>
+        </div>
+        <p class="hint" id="container-hint"></p>
+
         <h3 class="card-title">Minőség</h3>
         <div class="chips" role="radiogroup" id="quality">
           <label><input type="radio" name="quality" value="best" checked><span>Legjobb</span></label>
@@ -81,7 +89,7 @@
           <label><input type="radio" name="quality" value="720"><span>720p</span></label>
           <label><input type="radio" name="quality" value="480"><span>480p</span></label>
         </div>
-        <label class="switch-row">
+        <label class="switch-row" id="compatible-row">
           <span>
             <strong>Kompatibilis mód</strong>
             <small>H.264 + AAC: régebbi lejátszókon és tévéken is megy, de legfeljebb 1080p.</small>

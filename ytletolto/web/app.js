@@ -11,6 +11,7 @@ const el = {
   thumb: $("thumb"), badge: $("badge"), duration: $("duration"),
   kind: $("preview-kind"), title: $("title"), uploader: $("uploader"),
   videoOptions: $("video-options"), audioOptions: $("audio-options"),
+  containerHint: $("container-hint"), compatibleRow: $("compatible-row"),
   compatible: $("compatible"), playlistRow: $("playlist-row"), playlist: $("playlist"),
   folder: $("folder"), chooseFolder: $("choose-folder"), openFolder: $("open-folder"),
   download: $("download-btn"), progress: $("progress"), progressLabel: $("progress-label"),
@@ -152,16 +153,29 @@ el.paste.addEventListener("click", async () => {
 
 // --- Beállítások -------------------------------------------------------------
 
+const CONTAINERS = {
+  mp4: { label: "MP4", hint: "Mindenhol lejátszható: telefonon, tévén, szerkesztőprogramokban is." },
+  mkv: { label: "MKV", hint: "Bármilyen kodek belefér, így a legjobb hangsávot kapod; VLC-vel és a legtöbb lejátszóval megy." },
+  webm: { label: "WebM", hint: "Nyílt formátum (VP9/AV1 + Opus), böngészőkhöz ideális. Borítókép nélkül." },
+};
+
 function applyMode() {
   const audio = radioValue("mode") === "audio";
+  const container = CONTAINERS[radioValue("container")] ?? CONTAINERS.mp4;
   el.videoOptions.hidden = audio;
   el.audioOptions.hidden = !audio;
-  el.download.querySelector("#download-label").textContent = audio ? "MP3 letöltése" : "MP4 letöltése";
+  el.containerHint.textContent = container.hint;
+  el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
+  el.download.querySelector("#download-label").textContent = `${audio ? "MP3" : container.label} letöltése`;
 }
 
 radios("mode").forEach((r) => r.addEventListener("change", () => {
   applyMode();
   saveSettings({ mode: radioValue("mode") });
+}));
+radios("container").forEach((r) => r.addEventListener("change", () => {
+  applyMode();
+  saveSettings({ container: radioValue("container") });
 }));
 radios("quality").forEach((r) => r.addEventListener("change", () => saveSettings({ quality: radioValue("quality") })));
 el.compatible.addEventListener("change", () => saveSettings({ compatible: el.compatible.checked }));
@@ -205,6 +219,7 @@ async function startDownload() {
     url,
     mode: radioValue("mode"),
     quality: radioValue("quality"),
+    container: radioValue("container"),
     compatible: el.compatible.checked,
     playlist: state.isPlaylist || (!el.playlistRow.hidden && el.playlist.checked),
   });
@@ -286,6 +301,7 @@ window.addEventListener("pywebviewready", async () => {
   const { settings, ffmpeg, js_runtime } = await api().init();
   setRadio("mode", settings.mode);
   setRadio("quality", settings.quality);
+  setRadio("container", CONTAINERS[settings.container] ? settings.container : "mp4");
   el.compatible.checked = settings.compatible;
   showFolder(settings.output_dir);
   applyMode();

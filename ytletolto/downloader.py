@@ -17,11 +17,13 @@ from yt_dlp.utils import DownloadCancelled, DownloadError
 
 
 class Mode(Enum):
-    VIDEO = "video"  # MP4
+    VIDEO = "video"  # MP4 / MKV / WebM
     AUDIO = "audio"  # MP3
 
 
 MP3_BITRATE = "320K"
+# Videó fájlformátumok; az első az alapértelmezett.
+VIDEO_CONTAINERS = ("mp4", "mkv", "webm")
 
 
 @dataclass(frozen=True)
@@ -30,8 +32,9 @@ class DownloadRequest:
     output_dir: Path
     mode: Mode
     max_height: int | None = None
-    # H.264 + AAC: minden lejátszón megy, de a YouTube-on ez legfeljebb 1080p.
+    # H.264 + AAC: minden lejátszón megy, de a YouTube-on ez legfeljebb 1080p. WebM-nél nem értelmezett.
     compatible: bool = False
+    container: str = VIDEO_CONTAINERS[0]
     playlist: bool = False
 
 
@@ -128,7 +131,6 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
         "--output", template,
         "--windows-filenames",
         "--embed-metadata",
-        "--embed-thumbnail",
         "--yes-playlist" if request.playlist else "--no-playlist",
     ]
     if tools.ffmpeg_dir:
@@ -136,6 +138,7 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
 
     if request.mode is Mode.AUDIO:
         args += [
+            "--embed-thumbnail",
             "--format", "bestaudio/best",
             "--extract-audio",
             "--audio-format", "mp3",
@@ -143,20 +146,40 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
         ]
         return args
 
+    container = request.container
+    if container not in VIDEO_CONTAINERS:
+        raise ValueError(f"Ismeretlen videóformátum: {container}")
+    compatible = request.compatible and container != "webm"  # H.264 nem fér WebM-be
+
     # A HDR-es sáv nem HDR-es kijelzőn fakón jelenik meg, ezért az SDR-t vesszük előre.
     sort = ["hdr:sdr"]
-    if request.compatible:
+    if compatible:
         sort.append("vcodec:h264")
     if request.max_height:
         sort.append(f"res:{request.max_height}")
-    args += [
-        "--format-sort", ",".join(sort),
-        # Az AAC hang MP4-ben mindenhol lejátszható, az Opus nem; minőségben alig van különbség.
-        "--format", "bestvideo+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best",
-        "--merge-output-format", "mp4",
-        "--remux-video", "mp4",
-        "--embed-chapters",
-    ]
+    args += ["--format-sort", ",".join(sort), "--embed-chapters"]
+
+    if container == "webm":
+        # Csak VP9/AV1 + Opus fér bele; ha egy videónál nincs ilyen, MKV lesz belőle, nem hiba.
+        # Borítóképet a yt-dlp WebM-be nem tud beágyazni.
+        args += [
+            "--format", "bestvideo[ext=webm]+bestaudio[ext=webm]/bestvideo+bestaudio/best",
+            "--merge-output-format", "webm/mkv",
+            "--remux-video", "webm>webm/mkv",
+        ]
+    else:
+        if container == "mp4" or compatible:
+            # Az AAC hang mindenhol lejátszható, az Opus nem; minőségben alig van különbség.
+            video_format = "bestvideo+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best"
+        else:
+            # MKV-be bármi belefér, így a legjobb hangsávot (általában Opus) vesszük.
+            video_format = "bestvideo+bestaudio/best"
+        args += [
+            "--embed-thumbnail",
+            "--format", video_format,
+            "--merge-output-format", container,
+            "--remux-video", container,
+        ]
     return args
 
 
@@ -265,7 +288,7 @@ class _Logger:
 _POSTPROCESSOR_LABELS = {
     "Merger": "Videó és hang összefűzése…",
     "ExtractAudio": "Átalakítás MP3-ba…",
-    "VideoRemuxer": "Átcsomagolás MP4-be…",
+    "VideoRemuxer": "Átcsomagolás…",
     "EmbedThumbnail": "Borítókép beágyazása…",
     "Metadata": "Metaadatok beírása…",
 }

@@ -22,7 +22,17 @@ import webview
 from yt_dlp.utils import DownloadError
 
 from . import settings as settings_store
-from .downloader import Downloader, DownloadRequest, Event, Finished, Mode, Progress, find_tools, probe
+from .downloader import (
+    VIDEO_CONTAINERS,
+    Downloader,
+    DownloadRequest,
+    Event,
+    Finished,
+    Mode,
+    Progress,
+    find_tools,
+    probe,
+)
 
 APP_TITLE = "YT Letöltő"
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -94,6 +104,9 @@ class Api:
             if self._downloader:
                 return {"ok": False, "error": "Már fut egy letöltés."}
             quality = options.get("quality", "best")
+            container = options.get("container")
+            if container not in VIDEO_CONTAINERS:
+                container = VIDEO_CONTAINERS[0]
             request = DownloadRequest(
                 url=url,
                 output_dir=Path(self._settings["output_dir"]),
@@ -101,8 +114,11 @@ class Api:
                 max_height=None if quality == "best" else int(quality),
                 compatible=bool(options.get("compatible")),
                 playlist=bool(options.get("playlist")),
+                container=container,
             )
-            self.save_settings({"mode": request.mode.value, "quality": quality, "compatible": request.compatible})
+            self.save_settings(
+                {"mode": request.mode.value, "quality": quality, "compatible": request.compatible, "container": container}
+            )
             self._downloader = Downloader(self._emit, self._tools)
             threading.Thread(target=self._run, args=(self._downloader, request), daemon=True).start()
         return {"ok": True}

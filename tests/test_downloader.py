@@ -108,10 +108,11 @@ def test_unknown_audio_format_is_rejected():
 
 
 def test_paths_tools_and_playlist_template():
-    opts = build_ydl_opts(request(playlist=True), TOOLS)
+    download = request(playlist=True)
+    opts = build_ydl_opts(download, TOOLS)
 
-    assert opts["paths"] == {"home": "/out"}
-    assert opts["ffmpeg_location"] == "/opt/ffmpeg"
+    assert opts["paths"] == {"home": str(download.output_dir)}
+    assert opts["ffmpeg_location"] == str(TOOLS.ffmpeg_dir)
     assert opts["js_runtimes"] == {"deno": {"path": r"C:\app\deno.exe"}}
     assert opts["noplaylist"] is False
     assert "playlist_index" in opts["outtmpl"]["default"]

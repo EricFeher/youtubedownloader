@@ -138,59 +138,72 @@ def test_missing_ffmpeg_reports_error_without_downloading():
     assert "ffmpeg" in events[0].message
 
 
-def test_playlist_items_are_passed_to_yt_dlp():
-    opts = build_ydl_opts(request(playlist=True, playlist_items=(1, 3, 7)), TOOLS)
-
-    assert opts["playlist_items"] == "1,3,7"
+def items(*pairs: tuple[str, str]) -> list[dict]:
+    return [{"id": video_id, "mode": mode} for video_id, mode in pairs]
 
 
-def test_playlist_items_are_ignored_for_single_video():
-    opts = build_ydl_opts(request(playlist_items=(1, 3)), TOOLS)
-
-    assert opts.get("playlist_items") is None
-
-
-def test_split_by_mode_groups_items_and_defaults_to_video():
+def test_split_by_mode_groups_items_by_id_and_defaults_to_video():
     base = request(playlist=True, mode=Mode.AUDIO)
-    items = [
-        {"index": 3, "mode": "audio"},
-        {"index": 1, "mode": "video"},
-        {"index": 2},  # mód nélkül: videó
-        {"index": 5, "mode": "audio"},
-        {"index": 1, "mode": "audio"},  # ismétlődő sorszám: az első számít
-        {"index": 0, "mode": "audio"},  # érvénytelen
-        {"index": True, "mode": "audio"},  # érvénytelen
+    payload = [
+        {"id": "c", "mode": "audio"},
+        {"id": "a", "mode": "video"},
+        {"id": "b"},  # mód nélkül: videó
+        {"id": "e", "mode": "audio"},
+        {"id": "e", "mode": "audio"},  # ismétlődő elem: egyszer
+        {"id": "", "mode": "audio"},  # érvénytelen
+        {"id": 5, "mode": "audio"},  # érvénytelen
         "szemét",
     ]
 
-    video, audio = split_by_mode(base, items)
+    video, audio = split_by_mode(base, payload)
 
-    assert (video.mode, video.playlist_items) == (Mode.VIDEO, (1, 2))
-    assert (audio.mode, audio.playlist_items) == (Mode.AUDIO, (3, 5))
+    assert (video.mode, video.playlist_ids) == (Mode.VIDEO, ("a", "b"))
+    assert (audio.mode, audio.playlist_ids) == (Mode.AUDIO, ("c", "e"))
     assert video.playlist and audio.playlist
 
 
-def test_split_by_mode_skips_empty_group():
-    (only,) = split_by_mode(request(playlist=True), [{"index": 1, "mode": "audio"}, {"index": 2, "mode": "audio"}])
+def test_split_by_mode_downloads_whole_list_when_all_items_share_a_mode():
+    (whole,) = split_by_mode(request(playlist=True), items(("a", "audio"), ("b", "audio")))
 
-    assert (only.mode, only.playlist_items) == (Mode.AUDIO, (1, 2))
+    assert (whole.mode, whole.playlist_ids) == (Mode.AUDIO, ())
 
 
 def test_split_by_mode_keeps_request_without_items():
     single = request()
     whole_list = request(playlist=True, mode=Mode.AUDIO)
 
-    assert split_by_mode(single, [{"index": 1, "mode": "audio"}]) == [single]
+    assert split_by_mode(single, items(("a", "audio"), ("b", "video"))) == [single]
     assert split_by_mode(whole_list, None) == [whole_list]
-    assert split_by_mode(whole_list, []) == []
+    assert split_by_mode(whole_list, 5) == [whole_list]  # hibás adat a felületről
+    assert split_by_mode(whole_list, [{"id": ""}]) == []
+
+
+def test_selected_ids_become_a_match_filter():
+    (video, _) = split_by_mode(request(playlist=True), items(("a", "video"), ("b", "audio")))
+
+    match = build_ydl_opts(video, TOOLS)["match_filter"]
+
+    assert match({"playlist_id": "PL", "playlist_index": 0}, incomplete=True) is None  # maga a lista
+    assert match({"id": "a"}, incomplete=True) is None  # a YouTube-os kinyerő előszűrése, sorszám nélkül
+    assert match({"id": "a", "playlist_index": 1}, incomplete=True) is None
+    assert match({"id": "a", "playlist_index": 1}) is None  # teljes adatokkal újra ellenőrzi
+    assert match({"id": "b", "playlist_index": 2}, incomplete=True)
+    assert match({"id": "a", "playlist_index": 7}, incomplete=True)  # ugyanaz a videó később újra
+    assert match({"id": "x", "playlist_id": "a", "playlist_index": 1}, incomplete=True) is None  # beágyazott lista
+
+
+def test_whole_list_and_single_video_have_no_match_filter():
+    assert build_ydl_opts(request(playlist=True), TOOLS).get("match_filter") is None
+    assert build_ydl_opts(request(playlist_ids=("a",)), TOOLS).get("match_filter") is None
 
 
 class FakeYDL(yt_dlp.YoutubeDL):
-    """A yt-dlp helyett: minden kért elemre jelent egy kész letöltést és egy áthelyezett fájlt.
+    """A yt-dlp helyett: a `PLAYLIST` elemeiből a szűrőn átjutókra jelent egy letöltést és egy kész fájlt.
 
     Alosztály, mert a `parse_options` is a `yt_dlp.YoutubeDL` osztálymetódusait hívja.
     """
 
+    PLAYLIST: list[str] = []
     runs: list[dict] = []
 
     def __init__(self, opts: dict):
@@ -204,27 +217,35 @@ class FakeYDL(yt_dlp.YoutubeDL):
         return False
 
     def download(self, url_list):
-        indexes = [int(i) for i in self.opts["playlist_items"].split(",")]
-        for number, index in enumerate(indexes, start=1):
-            info = {"playlist_index": index, "playlist_autonumber": number, "n_entries": len(indexes), "vcodec": "none"}
-            self.opts["progress_hooks"][0]({"status": "finished", "filename": f"{index}.x", "info_dict": info})
-            self.opts["postprocessor_hooks"][0]({"status": "finished", "postprocessor": "MoveFiles", "info_dict": {"filepath": f"/out/{index}"}})
+        # A yt-dlp előbb az egész listára futtatja a szűrőt (azonosító nélkül), aztán az elemekre.
+        if self.opts["match_filter"]({"playlist_id": "PL", "playlist_index": 0}, incomplete=True) is not None:
+            return 0
+        for index, video_id in enumerate(self.PLAYLIST, start=1):
+            if self.opts["match_filter"]({"id": video_id}, incomplete=True) is not None:  # kinyerő előszűrése
+                continue
+            info = {"id": video_id, "playlist_id": "PL", "playlist_index": index, "n_entries": len(self.PLAYLIST), "vcodec": "none"}
+            if self.opts["match_filter"](info, incomplete=True) is not None:
+                continue
+            for status in ("downloading", "finished"):
+                self.opts["progress_hooks"][0]({"status": status, "filename": f"{index}.x", "info_dict": info})
+            self.opts["postprocessor_hooks"][0]({"status": "finished", "postprocessor": "MoveFiles", "info_dict": {"filepath": f"/out/{video_id}"}})
         return 0
 
 
-def test_run_downloads_video_and_audio_items_in_sequence(monkeypatch, tmp_path):
+def test_run_downloads_video_and_audio_items_by_id(monkeypatch, tmp_path):
     monkeypatch.setattr("ytletolto.downloader.yt_dlp.YoutubeDL", FakeYDL)
     FakeYDL.runs = []
+    # Az előnézet óta egy új videó ("uj") került a lista elejére, és "a" kétszer is szerepel.
+    FakeYDL.PLAYLIST = ["uj", "a", "b", "c", "a"]
     events = []
     base = request(playlist=True, output_dir=tmp_path)
-    requests = split_by_mode(base, [{"index": 1}, {"index": 2, "mode": "audio"}, {"index": 3}])
+    requests = split_by_mode(base, items(("a", "video"), ("b", "audio"), ("c", "video")))
 
     Downloader(events.append, TOOLS).run(*requests)
 
-    assert [opts["playlist_items"] for opts in FakeYDL.runs] == ["1,3", "2"]
+    assert [r.playlist_ids for r in requests] == [("a", "c"), ("b",)]
     assert "FFmpegExtractAudio" not in pp_keys(FakeYDL.runs[0])
     assert "FFmpegExtractAudio" in pp_keys(FakeYDL.runs[1])
     progress = [(e.item, e.mode) for e in events if isinstance(e, Progress)]
-    assert progress == [("1/3", "video"), ("2/3", "video"), ("3/3", "audio")]
-    assert events[-1] == Finished(True, "Kész!", ("/out/1", "/out/3", "/out/2"))
-
+    assert progress == [("1/3", "video")] * 2 + [("2/3", "video")] * 2 + [("3/3", "audio")] * 2
+    assert events[-1] == Finished(True, "Kész!", ("/out/a", "/out/c", "/out/b"))

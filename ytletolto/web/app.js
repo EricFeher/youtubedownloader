@@ -77,15 +77,22 @@ function log(text, level = "info") {
 
 // --- Előnézet ----------------------------------------------------------------
 
-function clearPreview() {
-  state.probeToken++;
-  state.probedUrl = "";
-  el.preview.hidden = el.skeleton.hidden = el.probeError.hidden = true;
+// Az előző linkhez tartozó állapot (lista, elemenkénti választás) eldobása, hogy ne keveredjen az újjal.
+function resetLinkState() {
   el.playlistRow.hidden = true;
+  el.playlist.checked = false;
   state.isPlaylist = false;
   state.maxHeight = null;
   updateQualityLimits(null);
   clearPlaylist();
+}
+
+function clearPreview() {
+  state.probeToken++;
+  state.probedUrl = "";
+  el.preview.hidden = el.skeleton.hidden = el.probeError.hidden = true;
+  resetLinkState();
+  applyMode();
 }
 
 async function runProbe() {
@@ -97,6 +104,8 @@ async function runProbe() {
   state.probedUrl = url;
   el.preview.hidden = el.probeError.hidden = true;
   el.skeleton.hidden = false;
+  resetLinkState();
+  applyMode();
 
   const res = await api().probe(url);
   if (token !== state.probeToken) return; // közben új link érkezett
@@ -106,6 +115,7 @@ async function runProbe() {
     el.probeError.textContent = res.error;
     el.probeError.hidden = false;
     state.probedUrl = "";
+    applyMode();
     return;
   }
   showPreview(res.info, url);
@@ -128,8 +138,6 @@ function showPreview(info, url) {
     el.duration.textContent = formatDuration(info.duration);
     el.duration.hidden = !info.duration;
     el.playlistRow.hidden = !hasPlaylist(url);
-    el.playlist.checked = false;
-    clearPlaylist();
   }
   state.isPlaylist = info.kind === "playlist";
   state.maxHeight = info.kind === "video" ? info.max_height : null;
@@ -143,6 +151,8 @@ function showPreview(info, url) {
 const playlistSelected = () => state.isPlaylist || (!el.playlistRow.hidden && el.playlist.checked);
 // Elemenkénti választás csak akkor van, ha a lista elemeit sikerült lekérni; különben a teljes lista egy módban megy.
 const perItemMode = () => playlistSelected() && state.entries.length > 0;
+// Amíg a link vagy a lista adatai töltődnek, még nem tudjuk, mit és hogyan kell letölteni.
+const loading = () => !el.skeleton.hidden || !el.playlistLoading.hidden;
 const itemMode = (index) => state.itemModes.get(index) ?? "video";
 
 function modeCounts() {
@@ -258,7 +268,8 @@ async function loadPlaylist() {
   if (!res.ok || res.info.kind !== "playlist" || !res.info.entries.length) {
     // Az elemek nélkül is letölthető a lista, csak egységesen a felül választott módban.
     el.playlistSummary.textContent = "";
-    el.playlistError.textContent = `${res.ok ? "A lista elemei nem érhetők el" : res.error}. A teljes lista a választott formátumban töltődik le.`;
+    const reason = res.ok ? "A lista elemei nem érhetők el" : res.error.replace(/\.+$/, "");
+    el.playlistError.textContent = `${reason}. A teljes lista a választott formátumban töltődik le.`;
     el.playlistError.hidden = false;
     applyMode();
     return;
@@ -333,6 +344,7 @@ function applyMode() {
   el.containerHint.textContent = container.hint;
   el.audioFormatHint.textContent = audioFormat.hint;
   el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
+  el.download.disabled = loading();
   el.download.querySelector("#download-label").textContent = perItem
     ? `${state.entries.length} elem letöltése`
     : `${(audio ? audioFormat : container).label} letöltése`;
@@ -383,10 +395,16 @@ function setIndeterminate(on) {
 }
 
 async function startDownload() {
-  // Amíg a lista elemei töltődnek, még nem tudjuk, melyik elem hogyan menjen.
-  if (state.downloading || !el.playlistLoading.hidden) return;
+  if (state.downloading) return;
   const url = el.url.value.trim();
   if (!url) { el.url.focus(); return; }
+  // Enterrel a késleltetett előnézet előtt is indulhat: előbb az új linket kérjük le, nehogy a régi lista menjen.
+  if (looksLikeUrl(url) && url !== state.probedUrl) {
+    clearTimeout(probeTimer);
+    await runProbe();
+    if (el.url.value.trim() !== url) return;
+  }
+  if (loading()) return;
 
   el.result.hidden = true;
   const res = await api().start({
@@ -397,7 +415,9 @@ async function startDownload() {
     audio_format: radioValue("audio_format"),
     compatible: el.compatible.checked,
     playlist: playlistSelected(),
-    items: perItemMode() ? state.entries.map((e) => ({ index: e.index, mode: itemMode(e.index) })) : null,
+    items: perItemMode() && state.playlistUrl === url
+      ? state.entries.map((e) => ({ id: e.id, mode: itemMode(e.index) }))
+      : null,
   });
   if (!res.ok) { showResult(false, res.error, []); return; }
 

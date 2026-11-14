@@ -55,6 +55,16 @@ def test_summarize_playlist_lists_entries_with_their_position():
     assert (entries[1].duration, entries[1].thumbnail) == (None, None)
 
 
+def test_summarize_channel_tabs_offer_no_per_item_choice():
+    # Csatorna linkjénél az elemek a csatorna fülei (Videók, Shorts…), mind a csatorna azonosítójával.
+    tab = {"_type": "playlist", "id": "UC1", "title": "Csatorna - Videos"}
+    info = {"_type": "playlist", "title": "Csatorna", "entries": [tab, {**tab, "title": "Csatorna - Shorts"}]}
+
+    assert summarize(info).entries == ()
+    assert summarize({**info, "entries": [{"_type": "url", "ie_key": "YoutubeTab", "id": "PL1"}]}).entries == ()
+    assert len(summarize({**info, "entries": [{"_type": "url", "ie_key": "Youtube", "id": "v"}]}).entries) == 1
+
+
 def test_summarize_video_has_no_entries():
     assert summarize({"title": "Klip"}).entries == ()
 

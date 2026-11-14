@@ -26,7 +26,7 @@ const el = {
 };
 
 const state = {
-  probeToken: 0, probedUrl: "", downloading: false, maxHeight: null, isPlaylist: false,
+  probeToken: 0, probedUrl: "", downloading: false, starting: false, maxHeight: null, isPlaylist: false,
   // A lista elemei és elemenként a választott mód ("video" | "audio"); alapból minden videó.
   playlistToken: 0, playlistUrl: "", entries: [], itemModes: new Map(),
 };
@@ -175,7 +175,10 @@ function showPlaylist(entries, url) {
   state.entries = entries || [];
   state.itemModes = new Map();
   el.playlistLoading.hidden = el.playlistError.hidden = true;
-  el.playlistItems.replaceChildren(...state.entries.map(playlistRow));
+  // Fragmenttel, mert a több tízezer elemes listák szétterítve túllépnék a függvényargumentumok korlátját.
+  const rows = document.createDocumentFragment();
+  for (const entry of state.entries) rows.append(playlistRow(entry));
+  el.playlistItems.replaceChildren(rows);
   el.playlistCard.hidden = state.entries.length === 0;
   updatePlaylistSummary();
 }
@@ -268,7 +271,7 @@ async function loadPlaylist() {
   if (!res.ok || res.info.kind !== "playlist" || !res.info.entries.length) {
     // Az elemek nélkül is letölthető a lista, csak egységesen a felül választott módban.
     el.playlistSummary.textContent = "";
-    const reason = res.ok ? "A lista elemei nem érhetők el" : res.error.replace(/\.+$/, "");
+    const reason = res.ok ? "Ennél a listánál nem lehet elemenként választani" : res.error.replace(/\.+$/, "");
     el.playlistError.textContent = `${reason}. A teljes lista a választott formátumban töltődik le.`;
     el.playlistError.hidden = false;
     applyMode();
@@ -395,7 +398,17 @@ function setIndeterminate(on) {
 }
 
 async function startDownload() {
-  if (state.downloading) return;
+  // Dupla kattintás vagy ismételt Enter ellen: amíg az első indítás tart, nem küldünk újat.
+  if (state.downloading || state.starting) return;
+  state.starting = true;
+  try {
+    await requestStart();
+  } finally {
+    state.starting = false;
+  }
+}
+
+async function requestStart() {
   const url = el.url.value.trim();
   if (!url) { el.url.focus(); return; }
   // Enterrel a késleltetett előnézet előtt is indulhat: előbb az új linket kérjük le, nehogy a régi lista menjen.

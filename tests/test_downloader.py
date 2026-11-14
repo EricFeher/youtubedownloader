@@ -184,12 +184,11 @@ def test_selected_ids_become_a_match_filter():
     match = build_ydl_opts(video, TOOLS)["match_filter"]
 
     assert match({"playlist_id": "PL", "playlist_index": 0}, incomplete=True) is None  # maga a lista
-    assert match({"id": "a"}, incomplete=True) is None  # a YouTube-os kinyerő előszűrése, sorszám nélkül
+    assert match({"id": "a"}, incomplete=True) is None  # a yt-dlp lapozás közbeni előszűrése, sorszám nélkül
     assert match({"id": "a", "playlist_index": 1}, incomplete=True) is None
     assert match({"id": "a", "playlist_index": 1}) is None  # teljes adatokkal újra ellenőrzi
     assert match({"id": "b", "playlist_index": 2}, incomplete=True)
     assert match({"id": "a", "playlist_index": 7}, incomplete=True)  # ugyanaz a videó később újra
-    assert match({"id": "x", "playlist_id": "a", "playlist_index": 1}, incomplete=True) is None  # beágyazott lista
 
 
 def test_whole_list_and_single_video_have_no_match_filter():
@@ -221,7 +220,7 @@ class FakeYDL(yt_dlp.YoutubeDL):
         if self.opts["match_filter"]({"playlist_id": "PL", "playlist_index": 0}, incomplete=True) is not None:
             return 0
         for index, video_id in enumerate(self.PLAYLIST, start=1):
-            if self.opts["match_filter"]({"id": video_id}, incomplete=True) is not None:  # kinyerő előszűrése
+            if self.opts["match_filter"]({"id": video_id}, incomplete=True) is not None:  # lapozás közbeni előszűrés
                 continue
             info = {"id": video_id, "playlist_id": "PL", "playlist_index": index, "n_entries": len(self.PLAYLIST), "vcodec": "none"}
             if self.opts["match_filter"](info, incomplete=True) is not None:
@@ -249,3 +248,18 @@ def test_run_downloads_video_and_audio_items_by_id(monkeypatch, tmp_path):
     progress = [(e.item, e.mode) for e in events if isinstance(e, Progress)]
     assert progress == [("1/3", "video")] * 2 + [("2/3", "video")] * 2 + [("3/3", "audio")] * 2
     assert events[-1] == Finished(True, "Kész!", ("/out/a", "/out/c", "/out/b"))
+
+
+def test_cancel_stops_while_skipping_unselected_items(monkeypatch, tmp_path):
+    monkeypatch.setattr("ytletolto.downloader.yt_dlp.YoutubeDL", FakeYDL)
+    FakeYDL.runs = []
+    FakeYDL.PLAYLIST = ["a", "b", "c"]
+    events = []
+    downloader = Downloader(events.append, TOOLS)
+    requests = split_by_mode(request(playlist=True, output_dir=tmp_path), items(("a", "video"), ("c", "audio")))
+    downloader.cancel()  # pl. a második menet lapozása közben nyomták meg
+
+    downloader.run(*requests)
+
+    assert not any(isinstance(e, Progress) for e in events)
+    assert events[-1] == Finished(False, "Letöltés megszakítva.", ())

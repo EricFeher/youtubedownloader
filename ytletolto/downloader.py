@@ -227,6 +227,7 @@ def _select_ids(ids: tuple[str, ...]) -> Callable[..., str | None]:
     """yt-dlp `match_filter`: csak a megadott videókat engedi át, mindegyiket egyszer.
 
     A lapos listaelemre is lefut, mielőtt a yt-dlp lekérné a videó adatait, így a kihagyás olcsó.
+    Csak önálló videókból álló listához való (lásd `_summarize_entries`).
     """
     wanted = set(ids)
     positions: dict[str, object] = {}  # azonosító → a letöltött előfordulás helye a listában
@@ -235,12 +236,10 @@ def _select_ids(ids: tuple[str, ...]) -> Callable[..., str | None]:
         video_id = info.get("id")
         if video_id is None:
             return None  # maga a lista: a yt-dlp az egész listára is lefuttatja a szűrőt, azonosító nélkül
-        if info.get("playlist_id") in wanted:
-            return None  # egy kiválasztott beágyazott lista (pl. csatorna listái) eleme
         if video_id not in wanted:
             return f"{info.get('title') or video_id}: ebben a menetben nincs kiválasztva"
-        # Ha a videó többször is szerepel a listában, csak az első előfordulását töltjük le. A YouTube-os
-        # kinyerő a lapozás közben sorszám nélkül is meghívja a szűrőt; azt még nem tekintjük előfordulásnak.
+        # Ha a videó többször is szerepel a listában, csak az első előfordulását töltjük le. A yt-dlp a lista
+        # lapozása közben sorszám nélkül is meghívja a szűrőt; azt még nem tekintjük előfordulásnak.
         position = info.get("playlist_index")
         if position is not None and positions.setdefault(video_id, position) != position:
             return f"{info.get('title') or video_id}: már szerepelt a listában"
@@ -314,7 +313,17 @@ def summarize(info: dict) -> VideoInfo:
     )
 
 
+def _is_video(entry: dict) -> bool:
+    """Lapos listaelemnél: önálló videó-e (és nem pl. egy csatorna Videók/Shorts füle, ami maga is lista)."""
+    kind = entry.get("_type", "video")
+    return kind == "video" or (kind in ("url", "url_transparent") and entry.get("ie_key") == "Youtube")
+
+
 def _summarize_entries(entries: list[dict | None]) -> Iterable[PlaylistEntry]:
+    """A lista elemei elemenkénti választáshoz. Ha nem mind önálló videó (pl. csatorna linkje, ahol az elemek
+    a csatorna fülei), üres: ilyenkor a teljes lista egyben, egy módban töltődik le."""
+    if not all(_is_video(entry) for entry in entries if entry):
+        return
     for position, entry in enumerate(entries, start=1):
         if not entry:
             continue
@@ -403,7 +412,6 @@ class Downloader:
         self._item_offset = 0
         self._item_total: int | None = None
         self._item_numbers: dict[str, int] = {}  # az aktuális menetben: azonosító → sorszám
-        self._pass_size = 0
 
     @property
     def tools(self) -> Tools:
@@ -436,9 +444,10 @@ class Downloader:
                 progress_hooks=[self._on_progress],
                 postprocessor_hooks=[self._on_postprocess(files)],
             )
+            if "match_filter" in opts:
+                opts["match_filter"] = self._cancellable(opts["match_filter"])
             self._mode = request.mode
             self._item_numbers = {}
-            self._pass_size = len(request.playlist_ids)
 
             try:
                 request.output_dir.mkdir(parents=True, exist_ok=True)
@@ -454,7 +463,7 @@ class Downloader:
             except Exception as e:  # noqa: BLE001 - a GUI-nak minden hibáról tudnia kell
                 self._emit(Finished(False, f"Váratlan hiba: {e}", tuple(files)))
                 return
-            self._item_offset += self._pass_size
+            self._item_offset += len(request.playlist_ids)
 
         if self._cancel.is_set():
             self._emit(Finished(False, "Letöltés megszakítva.", tuple(files)))
@@ -462,6 +471,16 @@ class Downloader:
             self._emit(Finished(False, "A letöltés hibával ért véget, részletek a naplóban.", tuple(files)))
         else:
             self._emit(Finished(True, "Kész!", tuple(files)))
+
+    def _cancellable(self, match_filter: Callable[..., str | None]) -> Callable[..., str | None]:
+        """A megszakítást a szűrőben is figyeljük: a kihagyott elemek átlépése alatt nincs folyamatjelzés."""
+
+        def match(info: dict, *, incomplete: bool = False) -> str | None:
+            if self._cancel.is_set():
+                raise DownloadCancelled()
+            return match_filter(info, incomplete=incomplete)
+
+        return match
 
     def _on_progress(self, d: dict) -> None:
         if self._cancel.is_set():
@@ -473,8 +492,7 @@ class Downloader:
         if self._item_total and info.get("id"):
             # A yt-dlp számozása a teljes listára vonatkozik (a kihagyott elemekkel együtt), ezért magunk számolunk.
             number = self._item_numbers.setdefault(info["id"], len(self._item_numbers) + 1)
-            if number <= self._pass_size:  # beágyazott listánál több videó jön, mint ahány elemet választottak
-                item = f"{self._item_offset + number}/{self._item_total}"
+            item = f"{self._item_offset + number}/{self._item_total}"
         filename = Path(d.get("filename") or "").name
         kind = "audio" if info.get("vcodec") == "none" else "video"
         mode = self._mode.value

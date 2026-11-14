@@ -19,7 +19,11 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
   Egyszerre több linket is beilleszthetsz (pl. soronként egyet), ezek egy kattintással a sorba kerülnek.
   Minden elemnek saját folyamatjelzője van, a futó letöltés megszakítható, a sikertelen újrapróbálható.
   Ugyanaz a link ugyanabban a formátumban nem kerül kétszer a sorba.
-- Lejátszási lista letöltése, folyamatjelző sebességgel és hátralévő idővel.
+- Lejátszási lista letöltése: pipával kijelölhetők a letöltendő elemek, és elemenként választható, hogy **videó** (alapértelmezett)
+  vagy **csak hang** legyen belőle; „Mind videó” / „Mind hang” gombbal egyszerre is átállítható. A fájlok a lista
+  nevű mappába kerülnek, az eredeti sorszámukkal. Listához tartozó videó linkjénél a „Teljes lejátszási lista”
+  kapcsolóval érhető el.
+- Folyamatjelző sebességgel és hátralévő idővel, megszakítás.
 - Megjegyzi a mentési mappát és az utoljára választott beállításokat.
 - A MediaMinds arculatában készült: sötét felület, zöld színátmenet, Outfit betűtípus és MediaMinds logó.
 

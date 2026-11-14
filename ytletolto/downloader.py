@@ -7,10 +7,10 @@ import re
 import shutil
 import sys
 import threading
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled, DownloadError
@@ -38,6 +38,9 @@ class DownloadRequest:
     container: str = VIDEO_CONTAINERS[0]
     audio_format: str = AUDIO_FORMATS[0]
     playlist: bool = False
+    # A lista mely elemei (videóazonosítók); üres = mind. Azonosító szerint választunk, nem sorszám
+    # szerint, így ha a lista az előnézet óta változott (pl. új feltöltés), akkor sem jön rossz videó.
+    playlist_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,7 @@ class Progress:
     item: str  # pl. "2/15" lejátszási listánál, különben üres
     kind: str  # "video" | "audio" – melyik sáv töltődik épp
     title: str = ""  # a videó, lejátszási listánál a lista címe
+    mode: str = Mode.VIDEO.value  # a letöltés módja: videó vagy csak hang
 
 
 @dataclass(frozen=True)
@@ -197,15 +201,72 @@ def _audio_args(audio_format: str) -> list[str]:
     return args
 
 
+def split_by_mode(request: DownloadRequest, items: object) -> list[DownloadRequest]:
+    """Lejátszási listánál az elemenként választott mód szerint két kérésre bont: előbb a videók, aztán a hangok.
+
+    `items`: `[{"id": "dQw4w9WgXcQ", "mode": "audio"}, …]`, csak a kijelölt elemek.
+    Megadott elemeknél mindig azonosító alapján szűrünk, akkor is, ha mind ugyanabban a módban van.
+    Ha nincs megadva, a teljes lista töltődik le.
+    """
+    if not request.playlist or not isinstance(items, list):
+        return [request]
+    chosen: dict[Mode, list[str]] = {Mode.VIDEO: [], Mode.AUDIO: []}
+    for item in items:
+        video_id = item.get("id") if isinstance(item, dict) else None
+        if not isinstance(video_id, str) or not video_id:
+            continue
+        mode = Mode.AUDIO if item.get("mode") == Mode.AUDIO.value else Mode.VIDEO
+        if video_id not in chosen[mode]:
+            chosen[mode].append(video_id)
+    groups = {mode: ids for mode, ids in chosen.items() if ids}
+    return [replace(request, mode=mode, playlist_ids=tuple(ids)) for mode, ids in groups.items()]
+
+
+def _select_ids(ids: tuple[str, ...]) -> Callable[..., str | None]:
+    """yt-dlp `match_filter`: csak a megadott videókat engedi át, mindegyiket egyszer.
+
+    A lapos listaelemre is lefut, mielőtt a yt-dlp lekérné a videó adatait, így a kihagyás olcsó.
+    Csak önálló videókból álló listához való (lásd `_summarize_entries`).
+    """
+    wanted = set(ids)
+    positions: dict[str, object] = {}  # azonosító → a letöltött előfordulás helye a listában
+
+    def match(info: dict, *, incomplete: bool = False) -> str | None:
+        video_id = info.get("id")
+        if video_id is None:
+            return None  # maga a lista: a yt-dlp az egész listára is lefuttatja a szűrőt, azonosító nélkül
+        if video_id not in wanted:
+            return f"{info.get('title') or video_id}: ebben a menetben nincs kiválasztva"
+        # Ha a videó többször is szerepel a listában, csak az első előfordulását töltjük le. A yt-dlp a lista
+        # lapozása közben sorszám nélkül is meghívja a szűrőt; azt még nem tekintjük előfordulásnak.
+        position = info.get("playlist_index")
+        if position is not None and positions.setdefault(video_id, position) != position:
+            return f"{info.get('title') or video_id}: már szerepelt a listában"
+        return None
+
+    return match
+
+
 def build_ydl_opts(request: DownloadRequest, tools: Tools) -> dict:
     opts = yt_dlp.parse_options(build_cli_args(request, tools)).ydl_opts
     if tools.js_runtimes:
         # Közvetlenül adjuk át, mert a CLI "név:útvonal" formátuma Windows-on ("C:\...") kétértelmű.
         opts["js_runtimes"] = tools.js_runtimes
+    if request.playlist and request.playlist_ids:
+        opts["match_filter"] = _select_ids(request.playlist_ids)
     return opts
 
 
 # --- Előnézet ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PlaylistEntry:
+    index: int  # 1-től számozott helye a listában, ezt kapja a `--playlist-items`
+    id: str
+    title: str
+    duration: int | None = None
+    thumbnail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +278,7 @@ class VideoInfo:
     duration: int | None = None  # másodperc
     max_height: int | None = None
     count: int | None = None  # lejátszási lista elemszáma
+    entries: tuple[PlaylistEntry, ...] = ()
 
 
 def summarize(info: dict) -> VideoInfo:
@@ -228,7 +290,7 @@ def summarize(info: dict) -> VideoInfo:
     if info.get("_type") == "playlist":
         entries = list(info.get("entries") or [])
         if not thumbnail and entries:
-            first = (entries[0].get("thumbnails") or [{}])[-1]
+            first = ((entries[0] or {}).get("thumbnails") or [{}])[-1]
             thumbnail = first.get("url")
         return VideoInfo(
             kind="playlist",
@@ -236,6 +298,7 @@ def summarize(info: dict) -> VideoInfo:
             uploader=uploader,
             thumbnail=thumbnail,
             count=info.get("playlist_count") or len(entries) or None,
+            entries=tuple(_summarize_entries(entries)),
         )
 
     heights = [f["height"] for f in info.get("formats") or [] if f.get("height") and f.get("vcodec") != "none"]
@@ -249,6 +312,31 @@ def summarize(info: dict) -> VideoInfo:
     )
 
 
+def _is_video(entry: dict) -> bool:
+    """Lapos listaelemnél: önálló videó-e (és nem pl. egy csatorna Videók/Shorts füle, ami maga is lista)."""
+    kind = entry.get("_type", "video")
+    return kind == "video" or (kind in ("url", "url_transparent") and entry.get("ie_key") == "Youtube")
+
+
+def _summarize_entries(entries: list[dict | None]) -> Iterable[PlaylistEntry]:
+    """A lista elemei elemenkénti választáshoz. Ha nem mind önálló videó (pl. csatorna linkje, ahol az elemek
+    a csatorna fülei), üres: ilyenkor a teljes lista egyben, egy módban töltődik le."""
+    if not all(_is_video(entry) for entry in entries if entry):
+        return
+    for position, entry in enumerate(entries, start=1):
+        if not entry:
+            continue
+        # A sorszám a lista egészében értendő, a kihagyott (üres) elemek is számítanak.
+        thumbnails = [t["url"] for t in entry.get("thumbnails") or [] if t.get("url")]
+        yield PlaylistEntry(
+            index=entry.get("playlist_index") or position,
+            id=entry.get("id") or "",
+            title=entry.get("title") or entry.get("id") or f"{position}. elem",
+            duration=int(entry["duration"]) if entry.get("duration") else None,
+            thumbnail=thumbnails[0] if thumbnails else entry.get("thumbnail"),  # a legkisebb is elég
+        )
+
+
 class _SilentLogger:
     def debug(self, msg: str) -> None: ...
     def info(self, msg: str) -> None: ...
@@ -256,14 +344,17 @@ class _SilentLogger:
     def error(self, msg: str) -> None: ...
 
 
-def probe(url: str, tools: Tools | None = None) -> VideoInfo:
-    """Letöltés nélkül lekéri a videó vagy lejátszási lista adatait. Hiba esetén DownloadError."""
+def probe(url: str, tools: Tools | None = None, playlist: bool = False) -> VideoInfo:
+    """Letöltés nélkül lekéri a videó vagy lejátszási lista adatait. Hiba esetén DownloadError.
+
+    `playlist=True`: listához tartozó videó linkjénél (`watch?v=…&list=…`) a listát kéri le.
+    """
     tools = tools or find_tools()
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
-        "noplaylist": True,
+        "noplaylist": not playlist,
         "extract_flat": "in_playlist",
         "logger": _SilentLogger(),
     }
@@ -315,6 +406,11 @@ class Downloader:
         self._emit = emit
         self._tools = tools or find_tools()
         self._cancel = threading.Event()
+        self._mode = Mode.VIDEO
+        # Elemenként választott listánál az elemek folyamatos számozásához, a menetek (videó, hang) között is.
+        self._item_offset = 0
+        self._item_total: int | None = None
+        self._item_numbers: dict[str, int] = {}  # az aktuális menetben: azonosító → sorszám
 
     @property
     def tools(self) -> Tools:
@@ -323,44 +419,67 @@ class Downloader:
     def cancel(self) -> None:
         self._cancel.set()
 
-    def run(self, request: DownloadRequest) -> None:
+    def run(self, *requests: DownloadRequest) -> None:
+        """A kéréseket egymás után futtatja (pl. egy lista videóként és hangként kért elemeit)."""
         if not self._tools.ffmpeg_dir:
             self._emit(Finished(False, "Az ffmpeg nem található. Telepítsd, vagy használd a csomagolt alkalmazást."))
             return
         if not self._tools.js_runtimes:
             self._emit(Log("Nincs JavaScript futtatókörnyezet (Deno) – a YouTube csak korlátozottan működhet.", "warning"))
 
+        if all(r.playlist and r.playlist_ids for r in requests):
+            self._item_total = sum(len(r.playlist_ids) for r in requests)
         files: list[str] = []
-        opts = build_ydl_opts(request, self._tools)
-        opts.update(
-            logger=_Logger(self._emit),
-            quiet=True,
-            noprogress=True,
-            progress_hooks=[self._on_progress],
-            postprocessor_hooks=[self._on_postprocess(files)],
-        )
+        failed = False
 
-        try:
-            request.output_dir.mkdir(parents=True, exist_ok=True)
-            self._emit(Status("Videó adatainak lekérése…"))
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                code = ydl.download([request.url])
-        except DownloadCancelled:
-            self._emit(Finished(False, "Letöltés megszakítva."))
-            return
-        except DownloadError as e:
-            self._emit(Finished(False, _clean_error(str(e))))
-            return
-        except Exception as e:  # noqa: BLE001 - a GUI-nak minden hibáról tudnia kell
-            self._emit(Finished(False, f"Váratlan hiba: {e}"))
-            return
+        for request in requests:
+            if self._cancel.is_set():
+                break
+            opts = build_ydl_opts(request, self._tools)
+            opts.update(
+                logger=_Logger(self._emit),
+                quiet=True,
+                noprogress=True,
+                progress_hooks=[self._on_progress],
+                postprocessor_hooks=[self._on_postprocess(files)],
+            )
+            if "match_filter" in opts:
+                opts["match_filter"] = self._cancellable(opts["match_filter"])
+            self._mode = request.mode
+            self._item_numbers = {}
+
+            try:
+                request.output_dir.mkdir(parents=True, exist_ok=True)
+                self._emit(Status(_fetch_status(request, len(requests) > 1)))
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    failed |= bool(ydl.download([request.url]))
+            except DownloadCancelled:
+                self._emit(Finished(False, "Letöltés megszakítva.", tuple(files)))
+                return
+            except DownloadError as e:
+                self._emit(Finished(False, _clean_error(str(e)), tuple(files)))
+                return
+            except Exception as e:  # noqa: BLE001 - a GUI-nak minden hibáról tudnia kell
+                self._emit(Finished(False, f"Váratlan hiba: {e}", tuple(files)))
+                return
+            self._item_offset += len(request.playlist_ids)
 
         if self._cancel.is_set():
-            self._emit(Finished(False, "Letöltés megszakítva."))
-        elif code:
+            self._emit(Finished(False, "Letöltés megszakítva.", tuple(files)))
+        elif failed:
             self._emit(Finished(False, "A letöltés hibával ért véget, részletek a naplóban.", tuple(files)))
         else:
             self._emit(Finished(True, "Kész!", tuple(files)))
+
+    def _cancellable(self, match_filter: Callable[..., str | None]) -> Callable[..., str | None]:
+        """A megszakítást a szűrőben is figyeljük: a kihagyott elemek átlépése alatt nincs folyamatjelzés."""
+
+        def match(info: dict, *, incomplete: bool = False) -> str | None:
+            if self._cancel.is_set():
+                raise DownloadCancelled()
+            return match_filter(info, incomplete=incomplete)
+
+        return match
 
     def _on_progress(self, d: dict) -> None:
         if self._cancel.is_set():
@@ -369,17 +488,22 @@ class Downloader:
         info = d.get("info_dict") or {}
         index, count = info.get("playlist_index"), info.get("n_entries")
         item = f"{index}/{count}" if index and count else ""
+        if self._item_total and info.get("id"):
+            # A yt-dlp számozása a teljes listára vonatkozik (a kihagyott elemekkel együtt), ezért magunk számolunk.
+            number = self._item_numbers.setdefault(info["id"], len(self._item_numbers) + 1)
+            item = f"{self._item_offset + number}/{self._item_total}"
         filename = Path(d.get("filename") or "").name
         kind = "audio" if info.get("vcodec") == "none" else "video"
         title = (info.get("playlist_title") if item else None) or info.get("title") or ""
+        mode = self._mode.value
 
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             done = d.get("downloaded_bytes") or 0
             percent = done / total * 100 if total else None
-            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item, kind, title))
+            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item, kind, title, mode))
         elif d["status"] == "finished":
-            self._emit(Progress(100.0, None, None, filename, item, kind, title))
+            self._emit(Progress(100.0, None, None, filename, item, kind, title, mode))
 
     def _on_postprocess(self, files: list[str]) -> Callable[[dict], None]:
         def hook(d: dict) -> None:
@@ -393,6 +517,13 @@ class Downloader:
                     files.append(path)
 
         return hook
+
+
+def _fetch_status(request: DownloadRequest, multiple: bool) -> str:
+    if not multiple:
+        return "Videó adatainak lekérése…"
+    what = "hangként" if request.mode is Mode.AUDIO else "videóként"
+    return f"{len(request.playlist_ids)} elem előkészítése {what}…"
 
 
 def _clean_error(message: str) -> str:

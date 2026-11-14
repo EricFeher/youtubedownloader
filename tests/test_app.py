@@ -91,3 +91,32 @@ def test_enqueue_rejects_empty_input_and_missing_ffmpeg(api):
     assert not result["ok"] and "ffmpeg" in result["error"]
     assert api._queue.snapshot().items == ()
     assert api.saved == []
+
+
+@pytest.mark.parametrize("selection, expected", [
+    ([{"id": "a", "mode": "video"}], [("video", ("a",))]),
+    ([{"id": "a", "mode": "video"}, {"id": "c", "mode": "audio"}],
+     [("video", ("a",)), ("audio", ("c",))]),
+])
+def test_enqueue_preserves_playlist_selection_and_modes(api, selection, expected):
+    result = api.enqueue({"items": [{
+        "url": "https://www.youtube.com/playlist?list=PL1",
+        "selection": selection,
+        "title": "Kiválasztott lista",
+    }]})
+    assert api._queue.wait_idle(5)
+
+    queued = api._queue.snapshot().items
+    assert result == {"ok": True, "added": len(expected), "skipped": 0}
+    assert [(i.request.mode.value, i.request.playlist_ids) for i in queued] == expected
+    assert all(i.title == "Kiválasztott lista" for i in queued)
+
+
+def test_enqueue_empty_playlist_selection_does_not_download_whole_list(api):
+    result = api.enqueue({"items": [{
+        "url": "https://www.youtube.com/playlist?list=PL1", "selection": [],
+    }]})
+
+    assert result["ok"] is False
+    assert api._queue.snapshot().items == ()
+    assert api.saved == []

@@ -30,7 +30,7 @@ from .download_queue import (
     extract_urls,
     is_playlist_url,
 )
-from .downloader import Downloader, Progress, find_tools, probe
+from .downloader import Downloader, Progress, find_tools, probe, split_by_mode
 
 APP_TITLE = "YT Letöltő"
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -60,9 +60,9 @@ class Api:
             "queue": event_payload(self._queue.snapshot()),
         }
 
-    def probe(self, url: str) -> dict:
+    def probe(self, url: str, playlist: bool = False) -> dict:
         try:
-            return {"ok": True, "info": dataclasses.asdict(probe(url.strip(), self._tools))}
+            return {"ok": True, "info": dataclasses.asdict(probe(url.strip(), self._tools, bool(playlist)))}
         except DownloadError as e:
             return {"ok": False, "error": _short_error(str(e))}
         except Exception as e:  # noqa: BLE001 - a felületnek minden hibáról tudnia kell
@@ -109,7 +109,11 @@ class Api:
                 continue
             playlist = entry.get("playlist")
             playlist = is_playlist_url(url) if playlist is None else bool(playlist)
-            entries.append((build_request(url, options, output_dir, playlist), entry.get("title") or "", entry.get("thumbnail")))
+            request = build_request(url, options, output_dir, playlist)
+            requests = split_by_mode(request, entry.get("selection"))
+            if not requests:
+                return {"ok": False, "error": "Jelölj ki legalább egy elemet a listában."}
+            entries.extend((r, entry.get("title") or "", entry.get("thumbnail")) for r in requests)
         if not entries:
             return {"ok": False, "error": "Adj meg egy linket."}
         if not self._tools.ffmpeg_dir:

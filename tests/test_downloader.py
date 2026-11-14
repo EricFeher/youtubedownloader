@@ -11,6 +11,7 @@ from ytletolto.downloader import (
     Mode,
     Progress,
     Tools,
+    Thumbnail,
     build_ydl_opts,
     find_tools,
     split_by_mode,
@@ -149,7 +150,7 @@ def test_find_tools_from_finder_finds_homebrew(tmp_path, monkeypatch, prefix, ru
     tools = find_tools(tmp_path)
 
     assert tools.ffmpeg_dir == Path(prefix)
-    assert tools.js_runtimes == {runtime: {"path": f"{prefix}/{runtime}"}}
+    assert tools.js_runtimes == {runtime: {"path": str(Path(prefix) / runtime)}}
 
 
 def test_missing_ffmpeg_reports_error_without_downloading():
@@ -218,6 +219,25 @@ def test_selected_ids_become_a_match_filter():
 def test_whole_list_and_single_video_have_no_match_filter():
     assert build_ydl_opts(request(playlist=True), TOOLS).get("match_filter") is None
     assert build_ydl_opts(request(playlist_ids=("a",)), TOOLS).get("match_filter") is None
+
+
+def test_video_thumbnail_is_emitted_before_download_only_for_selected_complete_video():
+    events = []
+    downloader = Downloader(events.append, TOOLS)
+    match = downloader._cancellable(build_ydl_opts(request(playlist=True, playlist_ids=("a",)), TOOLS)["match_filter"])
+    match({"id": "a", "thumbnail": "incomplete.jpg"}, incomplete=True)
+    match({"id": "b", "thumbnail": "not-selected.jpg"})
+    assert events == []
+    match({"id": "a", "thumbnail": "a.jpg"})
+    assert events == [Thumbnail("a.jpg")]
+
+
+def test_thumbnail_without_selection_uses_video_metadata_and_clears_missing_image():
+    events = []
+    match = Downloader(events.append, TOOLS)._cancellable(None)
+    match({"id": "a", "thumbnails": [{"url": "small.jpg"}, {"url": "large.jpg"}]})
+    match({"id": "b"})
+    assert events == [Thumbnail("large.jpg"), Thumbnail(None)]
 
 
 class FakeYDL(yt_dlp.YoutubeDL):

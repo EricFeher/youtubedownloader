@@ -121,3 +121,52 @@ def test_enqueue_empty_playlist_selection_does_not_download_whole_list(api):
     assert result["ok"] is False
     assert api._queue.snapshot().items == ()
     assert api.saved == []
+
+
+def test_enqueue_invalid_time_range_is_atomic(api):
+    result = api.enqueue({"items": [
+        {"url": "https://youtu.be/valid"},
+        {"url": "https://youtube.com/playlist?list=PL", "selection": [
+            {"id": "a", "options": {"start_time": 50, "end_time": 20}},
+        ]},
+    ]})
+    assert not result["ok"]
+    assert api._queue.snapshot().items == ()
+    assert api.saved == []
+
+
+def test_playlist_item_options_do_not_overwrite_global_defaults(api):
+    result = api.enqueue({"items": [{
+        "url": "https://youtube.com/playlist?list=PL", "selection": [
+            {"id": "a", "options": {"mode": "audio", "audio_format": "opus", "start_time": 10, "end_time": 30}},
+        ],
+    }], "mode": "video", "container": "mkv"})
+    assert result["ok"]
+    assert api._queue.wait_idle(5)
+    (item,) = api._queue.snapshot().items
+    assert item.request.mode.value == "audio"
+    assert (item.request.start_time, item.request.end_time) == (10, 30)
+    assert api.saved[-1]["mode"] == "video"
+    assert api.saved[-1]["audio_format"] == "mp3"
+    assert "start_time" not in api.saved[-1]
+
+
+def test_playlist_groups_start_with_their_first_video_thumbnail(api):
+    result = api.enqueue({"items": [{
+        "url": "https://youtube.com/playlist?list=PL", "thumbnail": "playlist.jpg",
+        "selection": [
+            {"id": "a", "thumbnail": "a.jpg", "options": {}},
+            {"id": "b", "thumbnail": "b.jpg", "options": {}},
+            {"id": "c", "thumbnail": "c.jpg", "options": {"mode": "audio"}},
+        ],
+    }]})
+    assert result["ok"] and api._queue.wait_idle(5)
+    assert [(item.request.playlist_ids, item.thumbnail) for item in api._queue.snapshot().items] == [
+        (("a", "b"), "a.jpg"), (("c",), "c.jpg"),
+    ]
+
+
+def test_playlist_without_video_thumbnail_does_not_use_playlist_cover(api):
+    result = api.enqueue({"items": [{"url": "https://youtube.com/playlist?list=PL", "thumbnail": "playlist.jpg"}]})
+    assert result["ok"] and api._queue.wait_idle(5)
+    assert api._queue.snapshot().items[0].thumbnail is None

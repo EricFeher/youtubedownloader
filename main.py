@@ -32,6 +32,9 @@ def check() -> int:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     if "--check" in sys.argv[1:2]:
         sys.exit(check())
 

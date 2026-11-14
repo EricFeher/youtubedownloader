@@ -81,6 +81,36 @@
 
     <!-- autocomplete="off": a motor ne állítsa vissza az űrlapot a mentett beállítások helyett -->
     <form class="card" autocomplete="off" onsubmit="return false">
+      <div class="preview editor-preview" id="editor-preview" hidden>
+        <div class="thumb" id="editor-thumb"></div>
+        <div class="preview-body">
+          <p class="eyebrow">Kiválasztott videó</p>
+          <h2 id="editor-title"></h2>
+          <p class="muted" id="editor-meta"></p>
+        </div>
+      </div>
+      <p class="hint" id="editor-loading" role="status" hidden>Videó adatainak betöltése…</p>
+      <p class="inline-error" id="editor-error" role="alert" hidden></p>
+
+      <section class="range-section" id="range-section" aria-label="Letöltendő időtartomány" hidden>
+        <div class="range-heading">
+          <h3 class="card-title">Letöltendő részlet</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="range-reset">Teljes videó</button>
+        </div>
+        <div class="range-values">
+          <label for="range-start">Kezdet <output id="range-start-value">0:00</output></label>
+          <label for="range-end">Vége <output id="range-end-value">0:00</output></label>
+        </div>
+        <div class="range-slider" id="range-slider">
+          <div class="range-track"></div>
+          <div class="range-selection" id="range-selection"></div>
+          <input type="range" min="0" max="1" step="1" value="0" id="range-start" aria-label="Részlet kezdete">
+          <input type="range" min="0" max="1" step="1" value="1" id="range-end" aria-label="Részlet vége">
+        </div>
+        <div class="range-scale"><span>0:00</span><span id="range-duration"></span></div>
+        <p class="hint range-summary" id="range-summary" role="status"></p>
+      </section>
+
       <h3 class="card-title" id="mode-title">Formátum</h3>
       <div class="format-grid" role="radiogroup" id="mode-grid">
         <label class="format-option">

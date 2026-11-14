@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 from urllib.parse import parse_qs, urlparse
 
-from .downloader import AUDIO_FORMATS, VIDEO_CONTAINERS, DownloadRequest, Event, Finished, Mode, Progress, Status
+from .downloader import AUDIO_FORMATS, VIDEO_CONTAINERS, DownloadRequest, Event, Finished, Mode, Progress, Status, Thumbnail
 
 
 class ItemState(Enum):
@@ -55,6 +55,8 @@ class QueueItem:
             "max_height": r.max_height,
             "compatible": r.compatible,
             "playlist": r.playlist,
+            "start_time": r.start_time,
+            "end_time": r.end_time,
         }
 
 
@@ -265,6 +267,13 @@ class DownloadQueue:
         item.message, item.files = result.message, result.files
 
     def _on_event(self, item: QueueItem, event: Event) -> None:
+        if isinstance(event, Thumbnail):
+            with self._lock:
+                if self._closed or item.thumbnail == event.url:
+                    return
+                item.thumbnail = event.url
+            self._changed()
+            return
         if isinstance(event, Finished):
             with self._lock:
                 self._finish_locked(item, event)
@@ -338,4 +347,30 @@ def build_request(url: str, options: dict, output_dir: Path, playlist: bool) -> 
         container=container if container in VIDEO_CONTAINERS else VIDEO_CONTAINERS[0],
         audio_format=audio_format if audio_format in AUDIO_FORMATS else AUDIO_FORMATS[0],
         playlist=playlist,
+        start_time=options.get("start_time", 0),
+        end_time=options.get("end_time"),
     )
+
+
+def build_requests(url: str, options: dict, output_dir: Path, playlist: bool, selection: object) -> list[DownloadRequest]:
+    """Azonos beállítású listaelemek közös menetben, videóazonosító alapján szűrve."""
+    from .downloader import split_by_mode
+
+    base = build_request(url, options, output_dir, playlist)
+    if not playlist or not isinstance(selection, list) or not any(isinstance(i, dict) and "options" in i for i in selection):
+        return split_by_mode(base, selection)
+    groups: dict[DownloadRequest, list[str]] = {}
+    seen: set[str] = set()
+    for item in selection:
+        if not isinstance(item, dict):
+            continue
+        video_id = item.get("id")
+        if not isinstance(video_id, str) or not video_id or video_id in seen:
+            continue
+        seen.add(video_id)
+        overrides = item.get("options", {})
+        if not isinstance(overrides, dict):
+            raise ValueError("Érvénytelen videóbeállítások.")
+        request = build_request(url, {**options, **overrides}, output_dir, True)
+        groups.setdefault(request, []).append(video_id)
+    return [dataclasses.replace(request, playlist_ids=tuple(ids)) for request, ids in groups.items()]

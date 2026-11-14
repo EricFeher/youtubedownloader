@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import math
 import re
 import shutil
 import sys
@@ -41,6 +42,21 @@ class DownloadRequest:
     # A lista mely elemei (videóazonosítók); üres = mind. Azonosító szerint választunk, nem sorszám
     # szerint, így ha a lista az előnézet óta változott (pl. új feltöltés), akkor sem jön rossz videó.
     playlist_ids: tuple[str, ...] = ()
+    start_time: float = 0
+    end_time: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.start_time is None:
+            raise ValueError("A kezdőidőt másodpercben kell megadni.")
+        for value in (self.start_time, self.end_time):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
+                raise ValueError("Az időpontnak véges, másodpercben megadott számnak kell lennie.")
+        if self.start_time < 0 or (self.end_time is not None and self.end_time <= self.start_time):
+            raise ValueError("A kezdet nem lehet negatív, a végének pedig később kell lennie a kezdetnél.")
+
+    @property
+    def is_section(self) -> bool:
+        return self.start_time > 0 or self.end_time is not None
 
 
 @dataclass(frozen=True)
@@ -70,6 +86,11 @@ class Status:
 
 
 @dataclass(frozen=True)
+class Thumbnail:
+    url: str | None
+
+
+@dataclass(frozen=True)
 class Log:
     text: str
     level: str = "info"  # info | warning | error
@@ -82,7 +103,7 @@ class Finished:
     files: tuple[str, ...] = ()
 
 
-Event = Progress | Status | Log | Finished
+Event = Progress | Status | Thumbnail | Log | Finished
 
 
 # --- Külső programok (ffmpeg, JS futtatókörnyezet) -------------------------
@@ -135,6 +156,8 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
         template = "%(playlist_title|Lejátszási lista)s/%(playlist_index|0)03d - %(title)s.%(ext)s"
     else:
         template = "%(title)s.%(ext)s"
+    if request.is_section:
+        template = template.removesuffix(".%(ext)s") + " [%(section_start)010.3f-%(section_end)010.3f].%(ext)s"
 
     args = [
         "--ignore-config",
@@ -146,6 +169,17 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
     ]
     if tools.ffmpeg_dir:
         args += ["--ffmpeg-location", str(tools.ffmpeg_dir)]
+
+    if request.is_section:
+        args += ["--download-sections", f"*{request.start_time}-{request.end_time if request.end_time is not None else 'inf'}"]
+        if request.mode is Mode.VIDEO:
+            # A kijelölt részt kódoljuk újra: a kezdés nem tolódik a közeli kulcsképkockára.
+            encoding = (
+                "-c:v libvpx-vp9 -crf 30 -b:v 0 -deadline good -cpu-used 4 -c:a libopus -b:a 192k"
+                if request.container == "webm" else
+                "-c:v libx264 -crf 18 -preset fast -pix_fmt yuv420p -c:a aac -b:a 192k"
+            )
+            args += ["--force-keyframes-at-cuts", "--downloader-args", f"ffmpeg_o:{encoding}"]
 
     if request.mode is Mode.AUDIO:
         return args + _audio_args(request.audio_format)
@@ -258,6 +292,19 @@ def build_ydl_opts(request: DownloadRequest, tools: Tools) -> dict:
         opts["js_runtimes"] = tools.js_runtimes
     if request.playlist and request.playlist_ids:
         opts["match_filter"] = _select_ids(request.playlist_ids)
+    if request.is_section:
+        def ranges(info: dict, ydl: yt_dlp.YoutubeDL) -> list[dict]:
+            duration = info.get("duration")
+            if info.get("is_live"):
+                raise DownloadError("Élő adásból nem választható időtartomány.")
+            if duration is not None and request.start_time >= duration:
+                raise DownloadError(f"{info.get('title') or 'A videó'}: a kezdőidő a videó végén kívül esik.")
+            end = request.end_time if request.end_time is not None else float("inf")
+            if duration is not None:
+                end = min(end, duration)
+            return [{"start_time": request.start_time, "end_time": end}]
+
+        opts["download_ranges"] = ranges
     return opts
 
 
@@ -314,6 +361,7 @@ class VideoInfo:
     entries: tuple[PlaylistEntry, ...] = ()
     # quality_key() szerint; csökkenő sorrendben, az első a "Legjobb". Üres, ha nem sikerült kiszámolni.
     qualities: dict[str, list[Quality]] = field(default_factory=dict)
+    is_live: bool = False
 
 
 def summarize(info: dict) -> VideoInfo:
@@ -344,6 +392,7 @@ def summarize(info: dict) -> VideoInfo:
         thumbnail=thumbnail,
         duration=int(info["duration"]) if info.get("duration") else None,
         max_height=max(tiers) if tiers else None,
+        is_live=bool(info.get("is_live")),
     )
 
 
@@ -474,6 +523,18 @@ class _Logger:
         self._emit(Log(msg, "error"))
 
 
+class _SectionYoutubeDL(yt_dlp.YoutubeDL):
+    """Az újrakódolt részlet már letöltéskor a választott konténerbe kerül.
+
+    A forrás lehet pl. WebM, akkor is, ha MP4-et kértünk. Az ffmpeg-nek
+    a kimeneti konténert kell átadni, mert a H.264 nem írható WebM-be.
+    """
+
+    def process_info(self, info_dict: dict) -> None:
+        info_dict["ext"] = self.params["_section_container"]
+        return super().process_info(info_dict)
+
+
 # A kulcs a yt-dlp utófeldolgozó neve (PostProcessor.pp_key()).
 _POSTPROCESSOR_LABELS = {
     "Merger": "Videó és hang összefűzése…",
@@ -487,11 +548,12 @@ _POSTPROCESSOR_LABELS = {
 class Downloader:
     """Egy letöltés futtatása. A `run` blokkol, ezért háttérszálon kell hívni."""
 
-    def __init__(self, emit: Callable[[Event], None], tools: Tools | None = None):
+    def __init__(self, emit: Callable[[Event], None], tools: Tools | None = None, *, _inline_sections: bool = False):
         self._emit = emit
         self._tools = tools or find_tools()
         self._cancel = threading.Event()
         self._mode = Mode.VIDEO
+        self._inline_sections = _inline_sections
         # Elemenként választott listánál az elemek folyamatos számozásához, a menetek (videó, hang) között is.
         self._item_offset = 0
         self._item_total: int | None = None
@@ -520,6 +582,19 @@ class Downloader:
         for request in requests:
             if self._cancel.is_set():
                 break
+            if request.is_section and not self._inline_sections:
+                # Az ffmpeg nem ad folyamatos yt-dlp hookokat. A saját folyamat
+                # biztosítja, hogy a Megszakítás a tényleges letöltést is leállítsa.
+                from .section_worker import download_section
+
+                self._emit(Status("Kijelölt részlet letöltése és feldolgozása…"))
+                result = download_section(request, self._tools, self._emit, self._cancel)
+                files.extend(path for path in result.files if path not in files)
+                if not result.ok:
+                    self._emit(Finished(False, result.message, tuple(files)))
+                    return
+                self._item_offset += len(request.playlist_ids)
+                continue
             opts = build_ydl_opts(request, self._tools)
             opts.update(
                 logger=_Logger(self._emit),
@@ -528,15 +603,18 @@ class Downloader:
                 progress_hooks=[self._on_progress],
                 postprocessor_hooks=[self._on_postprocess(files)],
             )
-            if "match_filter" in opts:
-                opts["match_filter"] = self._cancellable(opts["match_filter"])
+            opts["match_filter"] = self._cancellable(opts.get("match_filter"))
             self._mode = request.mode
             self._item_numbers = {}
 
             try:
                 request.output_dir.mkdir(parents=True, exist_ok=True)
                 self._emit(Status(_fetch_status(request, len(requests) > 1)))
-                with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl_class = yt_dlp.YoutubeDL
+                if request.is_section and request.mode is Mode.VIDEO:
+                    opts["_section_container"] = request.container
+                    ydl_class = _SectionYoutubeDL
+                with ydl_class(opts) as ydl:
                     failed |= bool(ydl.download([request.url]))
             except DownloadCancelled:
                 self._emit(Finished(False, "Letöltés megszakítva.", tuple(files)))
@@ -556,13 +634,19 @@ class Downloader:
         else:
             self._emit(Finished(True, "Kész!", tuple(files)))
 
-    def _cancellable(self, match_filter: Callable[..., str | None]) -> Callable[..., str | None]:
-        """A megszakítást a szűrőben is figyeljük: a kihagyott elemek átlépése alatt nincs folyamatjelzés."""
+    def _cancellable(self, match_filter: Callable[..., str | None] | None) -> Callable[..., str | None]:
+        """Megszakítás és az engedélyezett videó borítója, már a tényleges letöltés előtt."""
 
         def match(info: dict, *, incomplete: bool = False) -> str | None:
             if self._cancel.is_set():
                 raise DownloadCancelled()
-            return match_filter(info, incomplete=incomplete)
+            result = match_filter(info, incomplete=incomplete) if match_filter else None
+            if result is None and not incomplete and info.get("_type", "video") == "video":
+                thumbnail = info.get("thumbnail") or next(
+                    (t["url"] for t in reversed(info.get("thumbnails") or []) if t.get("url")), None,
+                )
+                self._emit(Thumbnail(thumbnail))
+            return result
 
         return match
 

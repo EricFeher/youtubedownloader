@@ -23,7 +23,9 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Tests
-        run: python -m pytest -q
+        run: |
+          python -m playwright install chromium
+          python -m pytest -q
 
       - name: Build (folder)
         run: python build.py

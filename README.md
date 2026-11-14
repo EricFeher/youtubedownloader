@@ -23,6 +23,17 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
   vagy **csak hang** legyen belőle; „Mind videó” / „Mind hang” gombbal egyszerre is átállítható. A fájlok a lista
   nevű mappába kerülnek, az eredeti sorszámukkal. Listához tartozó videó linkjénél a „Teljes lejátszási lista”
   kapcsolóval érhető el.
+- **Részlet letöltése**: a videó elejét és végét egy kétfogantyús csúszkán jelölheted ki; a zöld sáv mutatja
+  a letöltendő részt. A fogantyúk a nyílbillentyűkkel másodpercenként, Shift + nyíllal 10 másodpercenként
+  mozgathatók; a „Teljes videó” visszaállítja az egész felvételt. Videónál és csak hangnál is működik.
+- **Playlist szerkesztése**: kattints a lista egyik videójára. A lista alatti közös szerkesztőben annak
+  adatai, minősége, formátuma és időtartománya jelenik meg; a választásokat videónként megőrzi.
+  A pipa ettől függetlenül a letöltésbe kerülő elemeket jelöli. Az egyforma beállítású elemek közös
+  letöltési menetbe kerülnek, és megtartják a playlist mappáját és eredeti sorszámait.
+  A kivágott fájl nevében a kezdő- és végidő is szerepel.
+  A pontos videóvágás újrakódolással jár (MP4/MKV: H.264 + AAC; WebM: VP9 + Opus), ezért több időt
+  igényelhet. Részletletöltésnél a folyamatjelző a feldolgozás végét várja; a Megszakítás az ffmpeg-et is leállítja.
+  Élő adásnál és ismeretlen hosszúságú videónál nincs csúszka.
 - Folyamatjelző sebességgel és hátralévő idővel, megszakítás.
 - Megjegyzi a mentési mappát és az utoljára választott beállításokat.
 - A MediaMinds arculatában készült: sötét felület, zöld színátmenet, Outfit betűtípus és MediaMinds logó.
@@ -46,6 +57,7 @@ Python 3.10+ szükséges, valamint `ffmpeg` és `deno` a PATH-on.
 ```sh
 python -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt   # Windows: .venv\Scripts\pip
+.venv/bin/python -m playwright install chromium
 .venv/bin/python main.py
 .venv/bin/python -m pytest
 ```

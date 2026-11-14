@@ -22,6 +22,11 @@ const el = {
   videoFormatTitle: $("video-format-title"), audioFormatTitle: $("audio-format-title"),
   playlistCard: $("playlist-card"), playlistItems: $("playlist-items"), playlistSummary: $("playlist-summary"),
   playlistLoading: $("playlist-loading"), playlistError: $("playlist-error"),
+  editorPreview: $("editor-preview"), editorThumb: $("editor-thumb"), editorTitle: $("editor-title"), editorMeta: $("editor-meta"),
+  editorLoading: $("editor-loading"), editorError: $("editor-error"),
+  rangeSection: $("range-section"), rangeSlider: $("range-slider"), rangeSelection: $("range-selection"),
+  rangeStart: $("range-start"), rangeEnd: $("range-end"), rangeStartValue: $("range-start-value"), rangeEndValue: $("range-end-value"),
+  rangeDuration: $("range-duration"), rangeSummary: $("range-summary"), rangeReset: $("range-reset"),
 };
 
 const state = {
@@ -30,6 +35,9 @@ const state = {
   batch: [], // több beillesztett link, amíg sorba nem kerülnek
   queueVersion: -1, items: new Map(),
   playlistToken: 0, playlistUrl: "", entries: [], itemModes: new Map(), excludedItems: new Set(),
+  activeIndex: null, entryOptions: new Map(), entryInfo: new Map(), entryPending: new Map(),
+  singleOptions: null,
+  defaults: { mode: "video", quality: "best", container: "mp4", audio_format: "mp3", compatible: false },
 };
 
 const radios = (name) => [...document.querySelectorAll(`input[name="${name}"]`)];
@@ -39,7 +47,8 @@ const setRadio = (name, value) => radios(name).forEach((r) => { r.checked = r.va
 // --- Formázás ----------------------------------------------------------------
 
 function formatDuration(seconds) {
-  if (!seconds) return "";
+  if (seconds == null) return "";
+  seconds = Math.floor(seconds);
   const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
   const pad = (n) => String(n).padStart(2, "0");
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
@@ -103,6 +112,8 @@ function resetLinkState() {
   el.playlist.checked = false;
   state.isPlaylist = false;
   clearPlaylist();
+  state.singleOptions = null;
+  restoreOptions(state.defaults);
 }
 
 function clearPreview() {
@@ -142,6 +153,8 @@ async function runProbe() {
 }
 
 function showPreview(info, url) {
+  state.probeInfo = info;
+  state.isPlaylist = info.kind === "playlist";
   el.thumb.style.backgroundImage = cssUrl(info.thumbnail);
   el.title.textContent = info.title;
   el.uploader.textContent = info.uploader;
@@ -152,6 +165,8 @@ function showPreview(info, url) {
     el.playlistRow.hidden = true; // tiszta lista-link: a lista elemeiből választunk
     showPlaylist(info.entries, url);
   } else {
+    state.singleOptions = { ...state.defaults, start_time: 0, end_time: null };
+    restoreOptions(state.singleOptions);
     el.kind.textContent = "Videó";
     el.badge.textContent = heightLabel(info.max_height);
     el.badge.hidden = !info.max_height;
@@ -188,6 +203,10 @@ function clearPlaylist() {
   state.entries = [];
   state.itemModes = new Map();
   state.excludedItems = new Set();
+  state.activeIndex = null;
+  state.entryOptions = new Map();
+  state.entryInfo = new Map();
+  state.entryPending = new Map();
   el.playlistItems.replaceChildren();
   el.playlistCard.hidden = el.playlistLoading.hidden = el.playlistError.hidden = true;
 }
@@ -205,6 +224,7 @@ function showPlaylist(entries, url) {
   el.playlistItems.replaceChildren(rows);
   el.playlistCard.hidden = state.entries.length === 0;
   updatePlaylistSummary();
+  if (state.entries.length) selectPlaylistEntry(state.entries[0].index);
 }
 
 function playlistRow(entry) {
@@ -228,8 +248,10 @@ function playlistRow(entry) {
   thumb.loading = "lazy";
   if (entry.thumbnail) thumb.src = entry.thumbnail;
 
-  const text = document.createElement("span");
-  text.className = "playlist-text";
+  const text = document.createElement("button");
+  text.type = "button";
+  text.className = "playlist-text playlist-open";
+  text.setAttribute("aria-label", `${entry.title} beállításainak szerkesztése`);
   const title = document.createElement("span");
   title.className = "playlist-title";
   title.textContent = entry.title;
@@ -240,6 +262,10 @@ function playlistRow(entry) {
     duration.textContent = formatDuration(entry.duration);
     text.append(duration);
   }
+  const range = document.createElement("small");
+  range.className = "playlist-range";
+  range.hidden = true;
+  text.append(range);
 
   const toggle = document.createElement("span");
   toggle.className = "segmented";
@@ -259,8 +285,11 @@ function playlistRow(entry) {
 }
 
 function setItemMode(li, mode) {
-  state.itemModes.set(Number(li.dataset.index), mode);
+  const index = Number(li.dataset.index);
+  state.itemModes.set(index, mode);
+  optionsForEntry(index).mode = mode;
   li.querySelectorAll("button[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  if (state.activeIndex === index) restoreOptions(optionsForEntry(index));
 }
 
 function updatePlaylistSummary() {
@@ -292,8 +321,10 @@ el.playlistCard.querySelectorAll("button[data-select]").forEach((btn) => btn.add
 
 el.playlistItems.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-mode]");
-  if (!btn) return;
-  setItemMode(btn.closest(".playlist-item"), btn.dataset.mode);
+  const li = e.target.closest(".playlist-item");
+  if (!li || e.target.closest(".playlist-select")) return;
+  if (btn) setItemMode(li, btn.dataset.mode);
+  selectPlaylistEntry(Number(li.dataset.index));
   updatePlaylistSummary();
 });
 
@@ -339,8 +370,208 @@ el.playlist.addEventListener("change", () => {
     el.playlistLoading.hidden = true;
     if (!state.entries.length) state.playlistUrl = "";
     el.playlistCard.hidden = true;
+    restoreOptions(state.singleOptions ?? state.defaults);
     applyMode();
   }
+});
+
+// --- Közös videószerkesztő ----------------------------------------------------
+
+function optionsForEntry(index) {
+  if (!state.entryOptions.has(index)) {
+    state.entryOptions.set(index, { ...state.defaults, mode: itemMode(index), start_time: 0, end_time: null });
+  }
+  return state.entryOptions.get(index);
+}
+
+function editorOptions() {
+  return perItemMode() && state.activeIndex !== null
+    ? optionsForEntry(state.activeIndex) : playlistSelected() ? null : state.singleOptions;
+}
+
+function editorInfo() {
+  if (perItemMode()) {
+    const entry = state.entries.find((e) => e.index === state.activeIndex);
+    return entry ? state.entryInfo.get(entry.id) ?? { ...entry, kind: "video" } : null;
+  }
+  return playlistSelected() ? null : state.probeInfo;
+}
+
+function restoreOptions(options) {
+  for (const key of ["mode", "container", "audio_format"]) setRadio(key, options[key]);
+  state.quality = options.quality ?? "best";
+  el.compatible.checked = Boolean(options.compatible);
+}
+
+function readOptions() {
+  return {
+    mode: radioValue("mode"), quality: state.quality,
+    container: radioValue("container"), audio_format: radioValue("audio_format"), compatible: el.compatible.checked,
+  };
+}
+
+function rememberOptions() {
+  const options = readOptions();
+  const current = editorOptions();
+  if (current) Object.assign(current, options);
+  if (perItemMode()) {
+    state.itemModes.set(state.activeIndex, options.mode);
+    const row = playlistItemRow(state.activeIndex);
+    row?.querySelectorAll("button[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === options.mode)));
+  } else {
+    Object.assign(state.defaults, options);
+    saveSettings(options);
+  }
+}
+
+const playlistItemRow = (index) => el.playlistItems.querySelector(`.playlist-item[data-index="${index}"]`);
+
+async function selectPlaylistEntry(index) {
+  const entry = state.entries.find((e) => e.index === index);
+  if (!entry) return;
+  const previous = playlistItemRow(state.activeIndex);
+  previous?.classList.remove("active");
+  previous?.querySelector(".playlist-open").removeAttribute("aria-current");
+  state.activeIndex = index;
+  const row = playlistItemRow(index);
+  row?.classList.add("active");
+  row?.querySelector(".playlist-open").setAttribute("aria-current", "true");
+  restoreOptions(optionsForEntry(index));
+  applyMode();
+  if ((state.entryInfo.has(entry.id) && !state.entryInfo.get(entry.id).error) || state.entryPending.has(entry.id)) return;
+  const token = state.playlistToken;
+  const request = api().probe(`https://www.youtube.com/watch?v=${encodeURIComponent(entry.id)}`);
+  state.entryPending.set(entry.id, request);
+  renderEditor();
+  try {
+    const res = await request;
+    if (token !== state.playlistToken) return;
+    state.entryInfo.set(entry.id, res.ok && res.info.kind === "video"
+      ? res.info : { ...entry, kind: "video", error: res.error || "A videó adatai nem érhetők el." });
+  } catch {
+    if (token !== state.playlistToken) return;
+    state.entryInfo.set(entry.id, { ...entry, kind: "video", error: "A videó adatait nem sikerült betölteni." });
+  } finally {
+    if (token === state.playlistToken) {
+      state.entryPending.delete(entry.id);
+      if (perItemMode() && state.entries.find((e) => e.index === state.activeIndex)?.id === entry.id) applyMode();
+    }
+  }
+}
+
+function hasSection() {
+  const options = editorOptions();
+  return Boolean(options && (options.start_time > 0 || options.end_time != null));
+}
+
+function renderEditor() {
+  const info = editorInfo();
+  const perItem = perItemMode();
+  el.editorPreview.hidden = !perItem || !info;
+  const entry = state.entries.find((e) => e.index === state.activeIndex);
+  el.editorLoading.hidden = !perItem || !state.entryPending.has(entry?.id);
+  el.editorError.hidden = !perItem || !info?.error;
+  el.editorError.textContent = perItem ? info?.error ?? "" : "";
+  if (perItem && info) {
+    el.editorThumb.style.backgroundImage = cssUrl(info.thumbnail);
+    el.editorTitle.textContent = info.title;
+    el.editorMeta.textContent = [info.uploader, formatDuration(info.duration), info.max_height ? tierLabel(info.max_height) : null].filter(Boolean).join(" · ");
+  }
+  renderRange();
+}
+
+function renderRange() {
+  const info = editorInfo(), options = editorOptions();
+  const duration = Math.floor(info?.duration ?? 0);
+  if (options && info?.is_live) {
+    options.start_time = 0;
+    options.end_time = null;
+    const label = playlistItemRow(state.activeIndex)?.querySelector(".playlist-range");
+    if (label) label.hidden = true;
+  }
+  el.rangeSection.hidden = !options || duration < 1 || Boolean(info?.is_live);
+  if (el.rangeSection.hidden) return;
+  const start = Math.min(options.start_time ?? 0, duration - 1);
+  const end = Math.max(start + 1, Math.min(options.end_time ?? duration, duration));
+  options.start_time = start;
+  options.end_time = end === duration ? null : end;
+  el.rangeStart.max = el.rangeEnd.max = duration;
+  el.rangeStart.value = start;
+  el.rangeEnd.value = end;
+  el.rangeStartValue.textContent = formatDuration(start);
+  el.rangeEndValue.textContent = formatDuration(end);
+  el.rangeDuration.textContent = formatDuration(duration);
+  el.rangeStart.setAttribute("aria-valuetext", formatDuration(start));
+  el.rangeEnd.setAttribute("aria-valuetext", formatDuration(end));
+  el.rangeStart.setAttribute("aria-valuemax", end - 1);
+  el.rangeEnd.setAttribute("aria-valuemin", start + 1);
+  el.rangeSelection.style.left = `calc(12px + (100% - 24px) * ${start / duration})`;
+  el.rangeSelection.style.right = `calc(12px + (100% - 24px) * ${1 - end / duration})`;
+  el.rangeSummary.textContent = `${hasSection() ? "Kijelölt hossz" : "Teljes videó"}: ${formatDuration(end - start)}`;
+  el.rangeReset.disabled = !hasSection();
+  if (perItemMode()) {
+    const label = playlistItemRow(state.activeIndex)?.querySelector(".playlist-range");
+    if (label) {
+      label.hidden = !hasSection();
+      label.textContent = `${formatDuration(start)} – ${formatDuration(end)}`;
+    }
+  }
+}
+
+function changeRange(side, value) {
+  const options = editorOptions();
+  if (!options || el.rangeSection.hidden) return;
+  const duration = Number(el.rangeEnd.max);
+  if (side === "start") options.start_time = Math.max(0, Math.min(value, Number(el.rangeEnd.value) - 1));
+  else options.end_time = Math.min(duration, Math.max(value, Number(el.rangeStart.value) + 1));
+  renderRange();
+  renderQualities();
+}
+
+for (const [side, input] of [["start", el.rangeStart], ["end", el.rangeEnd]]) {
+  input.addEventListener("input", () => changeRange(side, Number(input.value)));
+  input.addEventListener("keydown", (event) => {
+    if (event.shiftKey && ["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp"].includes(event.key)) {
+      event.preventDefault();
+      changeRange(side, Number(input.value) + (["ArrowLeft", "ArrowDown"].includes(event.key) ? -10 : 10));
+    }
+  });
+}
+
+let draggedRangeSide = null;
+el.rangeSlider.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || el.rangeSection.hidden) return;
+  const bounds = el.rangeSlider.getBoundingClientRect();
+  const duration = Number(el.rangeEnd.max), width = Math.max(1, bounds.width - 24);
+  const startX = Number(el.rangeStart.value) / duration * width;
+  const endX = Number(el.rangeEnd.value) / duration * width;
+  const overlapping = endX - startX < 24;
+  const nativeThumb = event.target === el.rangeStart || event.target === el.rangeEnd;
+  if (nativeThumb && !overlapping) return;
+  if (nativeThumb) event.preventDefault();
+  const x = event.clientX - bounds.left - 12;
+  const value = Math.round(Math.max(0, Math.min(1, x / width)) * duration);
+  draggedRangeSide = overlapping
+    ? (x <= (startX + endX) / 2 ? "start" : "end")
+    : (Math.abs(x - startX) <= Math.abs(x - endX) ? "start" : "end");
+  el.rangeSlider.setPointerCapture(event.pointerId);
+  (draggedRangeSide === "start" ? el.rangeStart : el.rangeEnd).focus();
+  changeRange(draggedRangeSide, value);
+});
+el.rangeSlider.addEventListener("pointermove", (event) => {
+  if (!draggedRangeSide) return;
+  const bounds = el.rangeSlider.getBoundingClientRect();
+  const value = Math.round(Math.max(0, Math.min(1, (event.clientX - bounds.left - 12) / Math.max(1, bounds.width - 24))) * Number(el.rangeEnd.max));
+  changeRange(draggedRangeSide, value);
+});
+for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) el.rangeSlider.addEventListener(event, () => { draggedRangeSide = null; });
+el.rangeReset.addEventListener("click", () => {
+  const options = editorOptions();
+  if (!options) return;
+  options.start_time = 0;
+  options.end_time = null;
+  renderRange();
+  renderQualities();
 });
 
 // --- Minőség -----------------------------------------------------------------
@@ -357,8 +588,8 @@ function qualityKey() {
 
 // A videónál a választott formátumban ténylegesen letölthető fokozatok, csökkenő sorrendben; null, ha nem ismertek.
 function availableQualities() {
-  const info = state.probeInfo;
-  if (info?.kind !== "video" || (!el.playlistRow.hidden && el.playlist.checked)) return null;
+  const info = editorInfo();
+  if (info?.kind !== "video") return null;
   const list = info.qualities?.[qualityKey()];
   return list?.length ? list : null;
 }
@@ -372,8 +603,8 @@ function qualityChips() {
   const [top, ...rest] = available;
   const shown = top.tier > MIN_TIER ? rest.filter((q) => q.tier >= MIN_TIER) : rest;
   return [
-    { value: "best", label: `Legjobb · ${tierLabel(top.tier, top.fps)}`, size: top.size, tier: top.tier },
-    ...shown.map((q) => ({ value: String(q.tier), label: tierLabel(q.tier, q.fps), size: q.size, tier: q.tier })),
+    { value: "best", label: `Legjobb · ${tierLabel(top.tier, top.fps)}`, size: hasSection() ? null : top.size, tier: top.tier },
+    ...shown.map((q) => ({ value: String(q.tier), label: tierLabel(q.tier, q.fps), size: hasSection() ? null : q.size, tier: q.tier })),
   ];
 }
 
@@ -508,14 +739,12 @@ function applyMode() {
   const audio = radioValue("mode") === "audio";
   const container = CONTAINERS[radioValue("container")] ?? CONTAINERS.mp4;
   const audioFormat = AUDIO_FORMATS[radioValue("audio_format")] ?? AUDIO_FORMATS.mp3;
-  // Elemenkénti választásnál nincs közös mód: azokat a beállításokat mutatjuk, amelyik módot valamelyik elem használja.
   const perItem = perItemMode();
   const counts = perItem ? modeCounts() : null;
-  el.modeTitle.hidden = el.modeGrid.hidden = perItem;
-  el.videoOptions.hidden = perItem ? counts.video === 0 : audio;
-  el.audioOptions.hidden = perItem ? counts.audio === 0 : !audio;
-  el.videoFormatTitle.textContent = perItem ? "Videók fájlformátuma" : "Fájlformátum";
-  el.audioFormatTitle.textContent = perItem ? "Hangok fájlformátuma" : "Fájlformátum";
+  el.modeTitle.hidden = el.modeGrid.hidden = false;
+  el.videoOptions.hidden = audio;
+  el.audioOptions.hidden = !audio;
+  el.videoFormatTitle.textContent = el.audioFormatTitle.textContent = "Fájlformátum";
   el.containerHint.textContent = container.hint;
   el.audioFormatHint.textContent = audioFormat.hint;
   el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
@@ -525,28 +754,29 @@ function applyMode() {
     ? `${counts.video + counts.audio} elem letöltése`
     : `${(audio ? audioFormat : container).label} letöltése`;
   if (!perItem) updateDownloadLabel();
+  renderEditor();
 }
 
 radios("mode").forEach((r) => r.addEventListener("change", () => {
+  rememberOptions();
   applyMode();
-  saveSettings({ mode: radioValue("mode") });
 }));
 radios("container").forEach((r) => r.addEventListener("change", () => {
+  rememberOptions();
   applyMode();
-  saveSettings({ container: radioValue("container") });
 }));
 radios("audio_format").forEach((r) => r.addEventListener("change", () => {
+  rememberOptions();
   applyMode();
-  saveSettings({ audio_format: radioValue("audio_format") });
 }));
 // A chipek újrarajzolódnak, ezért a konténeren figyeljük; csak a felhasználó kattintása módosítja a választást.
 el.quality.addEventListener("change", () => {
   state.quality = radioValue("quality");
-  saveSettings({ quality: state.quality });
+  rememberOptions();
 });
 el.compatible.addEventListener("change", () => {
+  rememberOptions();
   renderQualities();
-  saveSettings({ compatible: el.compatible.checked });
 });
 el.playlist.addEventListener("change", renderQualities); // a teljes listánál nincs videónkénti lista
 
@@ -593,7 +823,11 @@ async function submitToQueue() {
     items = [{
       url,
       selection: perItemMode() && state.playlistUrl === url
-        ? selectedEntries().map((e) => ({ id: e.id, mode: itemMode(e.index) }))
+        ? selectedEntries().map((e) => ({
+          id: e.id,
+          thumbnail: state.entryInfo.get(e.id)?.thumbnail ?? e.thumbnail ?? null,
+          options: { ...optionsForEntry(e.index) },
+        }))
         : null,
       title: info?.title ?? "",
       thumbnail: info?.thumbnail ?? null,
@@ -606,12 +840,8 @@ async function submitToQueue() {
   }
 
   const res = await api().enqueue({
+    ...(perItemMode() ? state.defaults : { ...readOptions(), ...(!playlistSelected() ? state.singleOptions : {}), quality: radioValue("quality") }),
     items,
-    mode: radioValue("mode"),
-    quality: radioValue("quality"),
-    container: radioValue("container"),
-    audio_format: radioValue("audio_format"),
-    compatible: el.compatible.checked,
   });
   if (!res.ok) { showNotice(res.error, true); return; }
 
@@ -645,6 +875,7 @@ function formatLabel(item) {
     if (item.compatible && item.container !== "webm") parts.push("kompatibilis");
   }
   if (item.playlist) parts.push("lista");
+  if (item.start_time > 0 || item.end_time != null) parts.push(`${formatDuration(item.start_time ?? 0)} – ${item.end_time == null ? "végéig" : formatDuration(item.end_time)}`);
   return parts.join(" · ");
 }
 
@@ -818,6 +1049,7 @@ renderQualities(); // amíg a mentett beállítások meg nem érkeznek
 
 window.addEventListener("pywebviewready", async () => {
   const { settings, ffmpeg, js_runtime, queue } = await api().init();
+  for (const key of Object.keys(state.defaults)) state.defaults[key] = settings[key] ?? state.defaults[key];
   setRadio("mode", settings.mode);
   state.quality = settings.quality;
   setRadio("container", CONTAINERS[settings.container] ? settings.container : "mp4");

@@ -28,7 +28,7 @@ const el = {
 const state = {
   probeToken: 0, probedUrl: "", downloading: false, starting: false, maxHeight: null, isPlaylist: false,
   // A lista elemei és elemenként a választott mód ("video" | "audio"); alapból minden videó.
-  playlistToken: 0, playlistUrl: "", entries: [], itemModes: new Map(),
+  playlistToken: 0, playlistUrl: "", entries: [], itemModes: new Map(), excludedItems: new Set(),
 };
 
 const radios = (name) => [...document.querySelectorAll(`input[name="${name}"]`)];
@@ -153,11 +153,13 @@ const playlistSelected = () => state.isPlaylist || (!el.playlistRow.hidden && el
 const perItemMode = () => playlistSelected() && state.entries.length > 0;
 // Amíg a link vagy a lista adatai töltődnek, még nem tudjuk, mit és hogyan kell letölteni.
 const loading = () => !el.skeleton.hidden || !el.playlistLoading.hidden;
+const selectedEntries = () => state.entries.filter((e) => !state.excludedItems.has(e.index));
 const itemMode = (index) => state.itemModes.get(index) ?? "video";
 
 function modeCounts() {
-  const audio = state.entries.filter((e) => itemMode(e.index) === "audio").length;
-  return { video: state.entries.length - audio, audio };
+  const selected = selectedEntries();
+  const audio = selected.filter((e) => itemMode(e.index) === "audio").length;
+  return { video: selected.length - audio, audio };
 }
 
 function clearPlaylist() {
@@ -165,6 +167,7 @@ function clearPlaylist() {
   state.playlistUrl = "";
   state.entries = [];
   state.itemModes = new Map();
+  state.excludedItems = new Set();
   el.playlistItems.replaceChildren();
   el.playlistCard.hidden = el.playlistLoading.hidden = el.playlistError.hidden = true;
 }
@@ -174,6 +177,7 @@ function showPlaylist(entries, url) {
   state.playlistUrl = url;
   state.entries = entries || [];
   state.itemModes = new Map();
+  state.excludedItems = new Set();
   el.playlistLoading.hidden = el.playlistError.hidden = true;
   // Fragmenttel, mert a több tízezer elemes listák szétterítve túllépnék a függvényargumentumok korlátját.
   const rows = document.createDocumentFragment();
@@ -187,6 +191,12 @@ function playlistRow(entry) {
   const li = document.createElement("li");
   li.className = "playlist-item";
   li.dataset.index = entry.index;
+
+  const select = document.createElement("input");
+  select.type = "checkbox";
+  select.className = "playlist-select";
+  select.checked = true;
+  select.setAttribute("aria-label", `${entry.title} kijelölése letöltésre`);
 
   const number = document.createElement("span");
   number.className = "playlist-index";
@@ -224,7 +234,7 @@ function playlistRow(entry) {
     toggle.append(btn);
   }
 
-  li.append(number, thumb, text, toggle);
+  li.append(select, number, thumb, text, toggle);
   return li;
 }
 
@@ -235,9 +245,30 @@ function setItemMode(li, mode) {
 
 function updatePlaylistSummary() {
   const { video, audio } = modeCounts();
-  el.playlistSummary.textContent = `${state.entries.length} elem · ${video} videó, ${audio} hang`;
+  el.playlistSummary.textContent = `${video + audio} / ${state.entries.length} elem kijelölve · ${video} videó, ${audio} hang`;
   applyMode();
 }
+
+el.playlistItems.addEventListener("change", (e) => {
+  if (!e.target.matches(".playlist-select") || state.downloading) return;
+  const li = e.target.closest(".playlist-item");
+  const index = Number(li.dataset.index);
+  if (e.target.checked) state.excludedItems.delete(index);
+  else state.excludedItems.add(index);
+  li.classList.toggle("unselected", !e.target.checked);
+  updatePlaylistSummary();
+});
+
+el.playlistCard.querySelectorAll("button[data-select]").forEach((btn) => btn.addEventListener("click", () => {
+  if (state.downloading) return;
+  const checked = btn.dataset.select === "all";
+  state.excludedItems = new Set(checked ? [] : state.entries.map((e) => e.index));
+  el.playlistItems.querySelectorAll(".playlist-item").forEach((li) => {
+    li.querySelector(".playlist-select").checked = checked;
+    li.classList.toggle("unselected", !checked);
+  });
+  updatePlaylistSummary();
+}));
 
 el.playlistItems.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-mode]");
@@ -347,9 +378,9 @@ function applyMode() {
   el.containerHint.textContent = container.hint;
   el.audioFormatHint.textContent = audioFormat.hint;
   el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
-  el.download.disabled = loading();
+  el.download.disabled = loading() || (perItem && counts.video + counts.audio === 0);
   el.download.querySelector("#download-label").textContent = perItem
-    ? `${state.entries.length} elem letöltése`
+    ? `${counts.video + counts.audio} elem letöltése`
     : `${(audio ? audioFormat : container).label} letöltése`;
 }
 
@@ -389,7 +420,7 @@ function setDownloading(on) {
   el.cancel.disabled = false;
   el.url.disabled = el.paste.disabled = on;
   document.querySelectorAll(".card input, .card button").forEach((c) => { c.disabled = on; });
-  if (!on) updateQualityLimits(state.maxHeight);
+  if (!on) { updateQualityLimits(state.maxHeight); applyMode(); }
 }
 
 function setIndeterminate(on) {
@@ -417,7 +448,7 @@ async function requestStart() {
     await runProbe();
     if (el.url.value.trim() !== url) return;
   }
-  if (loading()) return;
+  if (loading() || (perItemMode() && selectedEntries().length === 0)) return;
 
   el.result.hidden = true;
   const res = await api().start({
@@ -429,7 +460,7 @@ async function requestStart() {
     compatible: el.compatible.checked,
     playlist: playlistSelected(),
     items: perItemMode() && state.playlistUrl === url
-      ? state.entries.map((e) => ({ id: e.id, mode: itemMode(e.index) }))
+      ? selectedEntries().map((e) => ({ id: e.id, mode: itemMode(e.index) }))
       : null,
   });
   if (!res.ok) { showResult(false, res.error, []); return; }

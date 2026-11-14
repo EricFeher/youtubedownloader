@@ -203,9 +203,9 @@ def _audio_args(audio_format: str) -> list[str]:
 def split_by_mode(request: DownloadRequest, items: object) -> list[DownloadRequest]:
     """Lejátszási listánál az elemenként választott mód szerint két kérésre bont: előbb a videók, aztán a hangok.
 
-    `items`: `[{"id": "dQw4w9WgXcQ", "mode": "audio"}, …]`, a lista összes eleme. Ha nincs megadva, vagy minden
-    elem ugyanabban a módban van, a teljes lista egyetlen kérésként, abban a módban töltődik le (mint korábban),
-    így az előnézetkor elérhetetlen vagy azóta hozzáadott elemek is letöltődnek.
+    `items`: `[{"id": "dQw4w9WgXcQ", "mode": "audio"}, …]`, csak a kijelölt elemek.
+    Megadott elemeknél mindig azonosító alapján szűrünk, akkor is, ha mind ugyanabban a módban van.
+    Ha nincs megadva, a teljes lista töltődik le.
     """
     if not request.playlist or not isinstance(items, list):
         return [request]
@@ -218,8 +218,6 @@ def split_by_mode(request: DownloadRequest, items: object) -> list[DownloadReque
         if video_id not in chosen[mode]:
             chosen[mode].append(video_id)
     groups = {mode: ids for mode, ids in chosen.items() if ids}
-    if len(groups) == 1:
-        return [replace(request, mode=next(iter(groups)))]
     return [replace(request, mode=mode, playlist_ids=tuple(ids)) for mode, ids in groups.items()]
 
 

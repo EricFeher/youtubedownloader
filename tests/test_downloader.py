@@ -162,10 +162,10 @@ def test_split_by_mode_groups_items_by_id_and_defaults_to_video():
     assert video.playlist and audio.playlist
 
 
-def test_split_by_mode_downloads_whole_list_when_all_items_share_a_mode():
+def test_split_by_mode_filters_selection_when_all_items_share_a_mode():
     (whole,) = split_by_mode(request(playlist=True), items(("a", "audio"), ("b", "audio")))
 
-    assert (whole.mode, whole.playlist_ids) == (Mode.AUDIO, ())
+    assert (whole.mode, whole.playlist_ids) == (Mode.AUDIO, ("a", "b"))
 
 
 def test_split_by_mode_keeps_request_without_items():
@@ -176,6 +176,7 @@ def test_split_by_mode_keeps_request_without_items():
     assert split_by_mode(whole_list, None) == [whole_list]
     assert split_by_mode(whole_list, 5) == [whole_list]  # hibás adat a felületről
     assert split_by_mode(whole_list, [{"id": ""}]) == []
+    assert split_by_mode(whole_list, []) == []
 
 
 def test_selected_ids_become_a_match_filter():
@@ -263,3 +264,15 @@ def test_cancel_stops_while_skipping_unselected_items(monkeypatch, tmp_path):
 
     assert not any(isinstance(e, Progress) for e in events)
     assert events[-1] == Finished(False, "Letöltés megszakítva.", ())
+
+
+def test_single_mode_selection_skips_other_playlist_items(monkeypatch, tmp_path):
+    monkeypatch.setattr("ytletolto.downloader.yt_dlp.YoutubeDL", FakeYDL)
+    FakeYDL.runs = []
+    FakeYDL.PLAYLIST = ["uj", "a", "b", "c"]
+    events = []
+    requests = split_by_mode(request(playlist=True, output_dir=tmp_path), items(("b", "video")))
+
+    Downloader(events.append, TOOLS).run(*requests)
+
+    assert events[-1] == Finished(True, "Kész!", ("/out/b",))

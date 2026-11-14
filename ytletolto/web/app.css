@@ -301,7 +301,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .playlist-card { animation: rise 0.35s var(--ease); }
 .playlist-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .playlist-head .hint { margin: 8px 0 0; }
-.playlist-bulk { display: flex; gap: 8px; }
+.playlist-bulk { display: flex; gap: 8px; flex-wrap: wrap; }
+.playlist-select { flex: none; width: 18px; height: 18px; accent-color: var(--accent, #6ee787); cursor: pointer; }
+.playlist-item.unselected .playlist-text, .playlist-item.unselected .playlist-thumb { opacity: 0.45; }
 .playlist-items {
   list-style: none;
   margin: 0 -8px;

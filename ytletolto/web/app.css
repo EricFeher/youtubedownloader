@@ -334,11 +334,16 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .playlist-item { display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 12px; transition: background 0.2s var(--ease); }
 .playlist-item:hover { background: var(--surface); }
+.playlist-item.active { background: rgba(117, 234, 117, 0.09); box-shadow: inset 3px 0 var(--green-light); }
+.playlist-open { padding: 8px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.playlist-open:focus-visible { outline: 2px solid var(--green-light); outline-offset: 3px; border-radius: 4px; }
+.playlist-item.active .playlist-title { color: var(--green-light); }
 .playlist-index { flex: none; width: 28px; text-align: right; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .playlist-thumb { flex: none; width: 64px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--surface-strong); }
 .playlist-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .playlist-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .playlist-text small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.playlist-range { color: var(--green-light) !important; }
 .playlist-loading { display: flex; flex-direction: column; gap: 10px; }
 .playlist-loading .line { height: 36px; border-radius: 12px; margin: 0; }
 
@@ -360,6 +365,27 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .segmented button[aria-pressed="true"] { color: var(--on-gradient); background: var(--gradient); }
 .segmented button:focus-visible { outline: 2px solid var(--green-light); outline-offset: 2px; }
 .segmented button:disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* Ugyanaz a szerkesztő egyetlen videónál és a playlist aktív eleménél. */
+.editor-preview { padding: 0 0 20px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: none; box-shadow: none; }
+.range-section { padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.range-heading, .range-values, .range-scale { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.range-heading { margin-bottom: 16px; }
+.range-heading .card-title { margin: 0; }
+.range-values label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.range-values label:last-child { text-align: right; }
+.range-values output { color: var(--text); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.range-slider { position: relative; height: 48px; touch-action: none; }
+.range-track, .range-selection { position: absolute; top: 21px; height: 6px; border-radius: 6px; pointer-events: none; }
+.range-track { left: 12px; right: 12px; background: var(--surface-strong); }
+.range-selection { background: var(--gradient); box-shadow: var(--glow); }
+.range-slider input { position: absolute; inset: 0; width: 100%; height: 48px; margin: 0; padding: 0; appearance: none; -webkit-appearance: none; pointer-events: none; background: transparent; }
+.range-slider input::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 24px; height: 30px; border: 3px solid var(--bg); border-radius: 9px; background: var(--green-light); box-shadow: 0 0 10px rgba(117, 234, 117, 0.25); pointer-events: auto; cursor: ew-resize; }
+.range-slider input::-moz-range-thumb { width: 18px; height: 24px; border: 3px solid var(--bg); border-radius: 9px; background: var(--green-light); pointer-events: auto; cursor: ew-resize; }
+.range-slider input::-moz-range-track { background: transparent; }
+.range-slider input:focus-visible { outline: 2px solid var(--green-light); outline-offset: 3px; border-radius: 10px; }
+.range-scale { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.range-summary { text-align: center; color: var(--green-light); margin: 10px 0 0; }
 
 .folder-row {
   display: flex;

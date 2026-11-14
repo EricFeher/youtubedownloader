@@ -25,12 +25,13 @@ from .download_queue import (
     DownloadQueue,
     ItemEvent,
     QueueEvent,
+    build_requests,
     build_request,
     event_payload,
     extract_urls,
     is_playlist_url,
 )
-from .downloader import Downloader, Progress, find_tools, probe, split_by_mode
+from .downloader import Downloader, Progress, find_tools, probe
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PROGRESS_INTERVAL = 0.1  # mp – ennél sűrűbben nem frissítjük a folyamatjelzőt
@@ -108,18 +109,27 @@ class Api:
                 continue
             playlist = entry.get("playlist")
             playlist = is_playlist_url(url) if playlist is None else bool(playlist)
-            request = build_request(url, options, output_dir, playlist)
-            requests = split_by_mode(request, entry.get("selection"))
+            try:
+                requests = build_requests(url, options, output_dir, playlist, entry.get("selection"))
+            except (TypeError, ValueError) as exc:
+                return {"ok": False, "error": str(exc)}
             if not requests:
                 return {"ok": False, "error": "Jelölj ki legalább egy elemet a listában."}
-            entries.extend((r, entry.get("title") or "", entry.get("thumbnail")) for r in requests)
+            selection = entry.get("selection")
+            for request in requests:
+                thumbnail = entry.get("thumbnail") if not playlist else None
+                if playlist and request.playlist_ids and isinstance(selection, list):
+                    first = next((item for item in selection if isinstance(item, dict) and item.get("id") == request.playlist_ids[0]), {})
+                    thumbnail = first.get("thumbnail")
+                entries.append((request, entry.get("title") or "", thumbnail))
         if not entries:
             return {"ok": False, "error": "Adj meg egy linket."}
         if not self._tools.ffmpeg_dir:
             return {"ok": False, "error": "Az ffmpeg nem található. Telepítsd, vagy használd a csomagolt alkalmazást."}
 
         added = sum(1 for item in self._queue.add_many(entries) if item)
-        request = entries[-1][0]
+        # A playlist egyedi videóbeállításai nem írják át az alkalmazás alapértékeit.
+        request = build_request("", options, output_dir, False)
         # A minőséget nem mentjük: a felület videónként a mentetthez legközelebbi elérhetőt küldi,
         # a felhasználó választását pedig a chipre kattintáskor menti el.
         self.save_settings(

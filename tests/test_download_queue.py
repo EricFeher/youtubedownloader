@@ -14,9 +14,35 @@ from ytletolto.download_queue import (
     extract_urls,
     is_playlist_url,
 )
-from ytletolto.downloader import DownloadRequest, Downloader, Finished, Log, Mode, Progress, Status, Tools
+from ytletolto.downloader import DownloadRequest, Downloader, Finished, Log, Mode, Progress, Status, Thumbnail, Tools
 
 TIMEOUT = 5
+
+
+def test_playlist_row_thumbnail_follows_current_video():
+    events = []
+
+    class Runner:
+        def __init__(self, emit):
+            self.emit = emit
+
+        def run(self, request):
+            for thumbnail in ("a.jpg", "b.jpg", None):
+                self.emit(Thumbnail(thumbnail))
+            self.emit(Finished(True, "Kész!"))
+
+        def cancel(self):
+            pass
+
+    queue = DownloadQueue(events.append, Runner)
+    try:
+        queue.add(request(playlist=True), thumbnail="first.jpg")
+        assert queue.wait_idle(TIMEOUT)
+        pictures = [event.items[0].thumbnail for event in events if isinstance(event, QueueChanged)]
+        assert "a.jpg" in pictures and "b.jpg" in pictures
+        assert pictures[-1] is None
+    finally:
+        queue.shutdown()
 
 
 def request(url: str = "https://youtu.be/ok", **overrides) -> DownloadRequest:
@@ -109,6 +135,19 @@ def test_runs_items_one_at_a_time_in_order(h):
     assert all(item.state is ItemState.DONE for item in items.values())
     assert items["b"].files == ("/out/b.mp4",)
 
+
+def test_different_sections_of_same_video_are_distinct_queue_items(h):
+    h.add("https://youtu.be/block")
+    assert h.blocking.wait(TIMEOUT)
+    first = request(start_time=10, end_time=20)
+    second = request(start_time=20, end_time=30)
+    assert h.queue.add(first) is not None
+    assert h.queue.add(second) is not None
+    assert h.queue.add(first) is None
+    payloads = [item.to_dict() for item in h.queue.snapshot().items]
+    assert [(item["start_time"], item["end_time"]) for item in payloads[1:]] == [(10, 20), (20, 30)]
+    h.queue.cancel(h.queue.snapshot().items[0].id)
+    h.wait()
 
 def test_failure_does_not_stop_the_queue(h):
     h.add("https://youtu.be/fail", "https://youtu.be/crash", "https://youtu.be/silent", "https://youtu.be/ok")
@@ -310,6 +349,7 @@ def test_event_payload_is_json_serialisable(h):
         "id": 0, "url": "https://youtu.be/ok", "title": "Cím: ok", "thumbnail": None, "state": "done",
         "message": "Kész!", "files": ["/out/ok.mp4"], "status": "Videó adatainak lekérése…", "mode": "video", "container": "mp4",
         "audio_format": "mp3", "max_height": None, "compatible": False, "playlist": False,
+        "start_time": 0, "end_time": None,
     }
     progress = next(p for p in payloads if p["type"] == "progress")
     assert progress["id"] == queue["items"][0]["id"] and progress["percent"] == 50.0

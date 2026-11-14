@@ -1,4 +1,5 @@
 -r requirements.txt
 pyinstaller>=6.22
 pytest>=9
+playwright>=1.40  # A tényleges felületi interakciók ellenőrzése Chromiumban
 pillow>=13  # PyInstaller ikonkonverzió (PNG → ICNS)

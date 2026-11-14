@@ -1,4 +1,4 @@
-# YT Letöltő
+# Media Minds Downloader
 
 Asztali alkalmazás YouTube-videók letöltéséhez **videóként** (MP4, MKV vagy WebM) vagy **hangként** (MP3, M4A, Opus vagy WAV), a lehető legjobb minőségben.
 Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete egy modern weboldalt idéz.
@@ -31,8 +31,8 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
 
 Töltsd le a [Releases](../../releases) oldalról (vagy a legutóbbi *Windows build* futás artifactjai közül):
 
-- `YTLetolto-windows.zip`: csomagold ki, és indítsd a `YTLetolto\YTLetolto.exe`-t. **Ez indul gyorsabban.**
-- `YTLetolto.exe`: egyetlen fájl, de minden indításkor kicsomagolja magát, ezért pár másodperccel lassabban indul.
+- `MediaMindsDownloader-windows.zip`: csomagold ki, és indítsd a `Media Minds Downloader\Media Minds Downloader.exe`-t. **Ez indul gyorsabban.**
+- `Media Minds Downloader.exe`: egyetlen fájl, de minden indításkor kicsomagolja magát, ezért pár másodperccel lassabban indul.
 
 Az ffmpeg és a Deno benne van a csomagban, semmit nem kell külön telepíteni. A felülethez a Microsoft Edge
 WebView2 kell, ami Windows 11-en és a frissített Windows 10-eken már gyárilag fent van.
@@ -55,9 +55,17 @@ macOS-en: `brew install ffmpeg deno`.
 ## Futtatható állomány készítése
 
 ```sh
-python build.py             # dist/YTLetolto/ mappa
-python build.py --onefile   # dist/YTLetolto.exe egyetlen fájlként
+python build.py             # dist/Media Minds Downloader/ mappa
+python build.py --onefile   # dist/Media Minds Downloader.exe egyetlen fájlként
 ```
+
+macOS-en a build a `dist/Media Minds Downloader.app` alkalmazást is elkészíti:
+
+```sh
+open "dist/Media Minds Downloader.app"
+```
+
+Finderből indítva is megtalálja a Homebrew-val telepített ffmpeg-et és Denót.
 
 Windows-on a `build.py` automatikusan letölti az ffmpeg-et és a Deno-t a `vendor/` mappába, és beépíti őket.
 A PyInstaller nem tud keresztfordítani, ezért Windows-os `.exe` csak Windows-on készülhet. Erre való a

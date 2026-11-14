@@ -20,7 +20,7 @@ from pathlib import Path
 import webview
 from yt_dlp.utils import DownloadError
 
-from . import settings as settings_store
+from . import APP_NAME, settings as settings_store
 from .download_queue import (
     DownloadQueue,
     ItemEvent,
@@ -32,7 +32,6 @@ from .download_queue import (
 )
 from .downloader import Downloader, Progress, find_tools, probe, split_by_mode
 
-APP_TITLE = "YT Letöltő"
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PROGRESS_INTERVAL = 0.1  # mp – ennél sűrűbben nem frissítjük a folyamatjelzőt
 
@@ -121,10 +120,11 @@ class Api:
 
         added = sum(1 for item in self._queue.add_many(entries) if item)
         request = entries[-1][0]
+        # A minőséget nem mentjük: a felület videónként a mentetthez legközelebbi elérhetőt küldi,
+        # a felhasználó választását pedig a chipre kattintáskor menti el.
         self.save_settings(
             {
                 "mode": request.mode.value,
-                "quality": str(request.max_height) if request.max_height else "best",
                 "compatible": request.compatible,
                 "container": request.container,
                 "audio_format": request.audio_format,
@@ -229,7 +229,7 @@ def _short_error(message: str) -> str:
 def main() -> None:
     api = Api()
     window = webview.create_window(
-        APP_TITLE,
+        APP_NAME,
         url=str(WEB_DIR / "index.html"),
         js_api=api,
         width=820,

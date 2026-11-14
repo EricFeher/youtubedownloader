@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -128,6 +129,27 @@ def test_find_tools_prefers_bundled_binaries(tmp_path, monkeypatch):
 
     assert tools.ffmpeg_dir == tmp_path
     assert tools.js_runtimes == {"deno": {"path": str(tmp_path / "deno")}}
+
+
+@pytest.mark.parametrize("prefix", ["/opt/homebrew/bin", "/usr/local/bin", "/custom/bin"])
+@pytest.mark.parametrize("runtime", ["deno", "node"])
+def test_find_tools_from_finder_finds_homebrew(tmp_path, monkeypatch, prefix, runtime):
+    monkeypatch.setattr("ytletolto.downloader.sys.platform", "darwin")
+    monkeypatch.setenv("PATH", os.pathsep.join(("/custom/bin", "/usr/bin", "/bin")))
+    binaries = {f"{prefix}/ffmpeg", f"{prefix}/{runtime}"}
+    if prefix == "/custom/bin":
+        binaries.update({"/opt/homebrew/bin/ffmpeg", f"/opt/homebrew/bin/{runtime}"})
+
+    def which(name, *, path):
+        return next((f"{directory}/{name}" for directory in path.split(os.pathsep)
+                     if f"{directory}/{name}" in binaries), None)
+
+    monkeypatch.setattr("ytletolto.downloader.shutil.which", which)
+
+    tools = find_tools(tmp_path)
+
+    assert tools.ffmpeg_dir == Path(prefix)
+    assert tools.js_runtimes == {runtime: {"path": f"{prefix}/{runtime}"}}
 
 
 def test_missing_ffmpeg_reports_error_without_downloading():

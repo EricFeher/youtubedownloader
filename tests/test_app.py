@@ -65,8 +65,9 @@ def test_enqueue_detects_playlists_only_when_the_ui_does_not_know(api):
     assert got["https://youtu.be/a?list=PL1"].playlist is True
     assert got["https://youtu.be/b"].playlist is False
     assert got["https://youtu.be/b"].output_dir == Path(api._settings["output_dir"])
+    # A minőség a felhasználó mentett választása marad; a videóhoz igazított érték nem írja felül.
     assert api.saved[-1] | {"output_dir": ""} == {
-        "output_dir": "", "mode": "audio", "quality": "720", "compatible": False, "container": "mp4", "audio_format": "opus",
+        "output_dir": "", "mode": "audio", "quality": "best", "compatible": False, "container": "mp4", "audio_format": "opus",
     }
 
 

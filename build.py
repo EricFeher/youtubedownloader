@@ -4,8 +4,8 @@ Windows-on letölti az ffmpeg-et és a Deno-t a `vendor/` mappába, és beépít
 így a kész programhoz semmit nem kell külön telepíteni. Más rendszeren a csomag a
 rendszerre telepített ffmpeg-et és Deno-t használja.
 
-    python build.py             # dist/YTLetolto/YTLetolto.exe (mappa, gyors indulás)
-    python build.py --onefile   # dist/YTLetolto.exe (egyetlen fájl, lassabb indulás)
+    python build.py             # dist/Media Minds Downloader/ (mappa, gyors indulás)
+    python build.py --onefile   # dist/Media Minds Downloader.exe (egyetlen fájl, lassabb indulás)
 """
 
 from __future__ import annotations
@@ -21,9 +21,10 @@ from pathlib import Path
 
 import PyInstaller.__main__
 
+from ytletolto import APP_NAME
+
 ROOT = Path(__file__).resolve().parent
 VENDOR = ROOT / "vendor"
-APP_NAME = "YTLetolto"
 
 # A yt-dlp csapat ffmpeg buildje, YouTube-hoz szükséges javításokkal.
 FFMPEG_WIN_URL = (
@@ -85,6 +86,8 @@ def main() -> None:
         "--specpath", str(ROOT / "build"),
     ]
     icon = ROOT / "assets" / ("icon.ico" if sys.platform == "win32" else "icon.png")
+    if sys.platform == "darwin":
+        pyinstaller_args += ["--osx-bundle-identifier", "hu.mediaminds.downloader"]
     if icon.is_file():
         pyinstaller_args += ["--icon", str(icon)]
     for binary in vendor_binaries():

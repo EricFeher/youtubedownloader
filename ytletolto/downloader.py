@@ -100,14 +100,18 @@ def _exe(name: str) -> str:
 
 
 def find_tools(base: Path | None = None) -> Tools:
-    """Előbb a csomagolt binárisokat keresi, utána a PATH-on lévőket."""
+    """Előbb a csomagolt binárisokat keresi, utána a PATH-on lévőket és macOS-en a Homebrew eszközeit."""
     base = base or bundled_dir()
+    search_path = os.environ.get("PATH", os.defpath)
+    if sys.platform == "darwin":
+        # A Finderből indított app PATH-ja nem tartalmazza a Homebrew mappáit.
+        search_path = os.pathsep.join((search_path, "/opt/homebrew/bin", "/usr/local/bin"))
 
     def locate(name: str) -> Path | None:
         candidate = base / _exe(name)
         if candidate.is_file():
             return candidate
-        found = shutil.which(name)
+        found = shutil.which(name, path=search_path)
         return Path(found) if found else None
 
     ffmpeg = locate("ffmpeg")
@@ -260,6 +264,35 @@ def build_ydl_opts(request: DownloadRequest, tools: Tools) -> dict:
 # --- Előnézet ---------------------------------------------------------------
 
 
+# Felbontási fokozatok; egy formátum a legkisebb olyanba tartozik, amibe belefér.
+QUALITY_TIERS = (144, 240, 360, 480, 720, 1080, 1440, 2160, 4320)
+
+
+def quality_tier(width: int | None, height: int | None) -> int | None:
+    """A fokozat a rövidebb oldalból, de a szélesvásznú kép a 16:9-es megfelelője (1920×800 is 1080p).
+
+    A rövidebb oldal miatt a függőleges (1080×1920) videó is 1080p, ahogy a yt-dlp `res` rendezése is számol.
+    """
+    sides = [s for s in (width, height) if s]
+    if not sides:
+        return None
+    size = max(min(sides), max(sides) * 9 / 16)
+    # A tűrés a nem pontosan 16:9-es méretek miatt kell: a YouTube 480p-je 854×480, ebből 480,4 jönne ki.
+    return next((t for t in QUALITY_TIERS if t >= size * 0.97), round(size))
+
+
+def quality_key(container: str, compatible: bool) -> str:
+    """Az elérhető minőségek kulcsa; a felület ugyanígy képzi a választott formátumból."""
+    return f"{container}-compatible" if compatible and container != "webm" else container
+
+
+@dataclass(frozen=True)
+class Quality:
+    tier: int  # ezt kapja a letöltés max_height-ként
+    fps: int | None
+    size: int | None  # becsült fájlméret bájtban, hanggal együtt
+
+
 @dataclass(frozen=True)
 class PlaylistEntry:
     index: int  # 1-től számozott helye a listában, ezt kapja a `--playlist-items`
@@ -276,9 +309,11 @@ class VideoInfo:
     uploader: str
     thumbnail: str | None
     duration: int | None = None  # másodperc
-    max_height: int | None = None
+    max_height: int | None = None  # a legnagyobb fokozat
     count: int | None = None  # lejátszási lista elemszáma
     entries: tuple[PlaylistEntry, ...] = ()
+    # quality_key() szerint; csökkenő sorrendben, az első a "Legjobb". Üres, ha nem sikerült kiszámolni.
+    qualities: dict[str, list[Quality]] = field(default_factory=dict)
 
 
 def summarize(info: dict) -> VideoInfo:
@@ -301,14 +336,14 @@ def summarize(info: dict) -> VideoInfo:
             entries=tuple(_summarize_entries(entries)),
         )
 
-    heights = [f["height"] for f in info.get("formats") or [] if f.get("height") and f.get("vcodec") != "none"]
+    tiers = [t for f in _video_formats(info) if (t := quality_tier(f.get("width"), f.get("height")))]
     return VideoInfo(
         kind="video",
         title=info.get("title") or "",
         uploader=uploader,
         thumbnail=thumbnail,
         duration=int(info["duration"]) if info.get("duration") else None,
-        max_height=max(heights) if heights else None,
+        max_height=max(tiers) if tiers else None,
     )
 
 
@@ -337,6 +372,49 @@ def _summarize_entries(entries: list[dict | None]) -> Iterable[PlaylistEntry]:
         )
 
 
+def _video_formats(info: dict) -> list[dict]:
+    return [f for f in info.get("formats") or [] if f.get("vcodec") != "none"]
+
+
+def available_qualities(ydl: yt_dlp.YoutubeDL, info: dict, tools: Tools) -> dict[str, list[Quality]]:
+    """Minden videóformátumhoz (MP4, MKV, WebM, kompatibilis mód) a ténylegesen letölthető fokozatok.
+
+    Nem utánozzuk a yt-dlp döntését: a letöltés beállításaival a saját rendezőjét és formátumválasztóját
+    futtatjuk le fokozatonként, így pontosan az jelenik meg, amit a letöltés is választana.
+    """
+    tiers = sorted({t for f in _video_formats(info) if (t := quality_tier(f.get("width"), f.get("height")))}, reverse=True)
+    variants = {quality_key(c, compat): (c, compat) for c in VIDEO_CONTAINERS for compat in (False, True)}
+    result: dict[str, list[Quality]] = {}
+    for key, (container, compatible) in variants.items():
+        options: dict[int, Quality] = {}
+        for tier in (None, *tiers):  # None: a "Legjobb", ez adja a legfelső fokozatot
+            request = DownloadRequest("", Path(), Mode.VIDEO, tier, compatible, container)
+            chosen = _select_format(ydl, info, build_ydl_opts(request, tools))
+            video = next((f for f in (chosen or {}).get("requested_formats") or [chosen] if f and f.get("vcodec") != "none"), None)
+            got = quality_tier(video.get("width"), video.get("height")) if video else None
+            # Ha a kért fokozat helyett mást választana (pl. kompatibilis módban 4K helyett 1080p), az nem elérhető.
+            if got is None or got in options or (tier and got != tier):
+                continue
+            fps = video.get("fps")
+            options[got] = Quality(got, round(fps) if fps else None, chosen.get("filesize") or chosen.get("filesize_approx"))
+        result[key] = sorted(options.values(), key=lambda q: q.tier, reverse=True)
+    return result
+
+
+def _select_format(ydl: yt_dlp.YoutubeDL, info: dict, opts: dict) -> dict | None:
+    """Amit a yt-dlp ezekkel a beállításokkal letöltene (összefűzésnél a `requested_formats` a két sáv)."""
+    ydl.params["format_sort"] = opts["format_sort"]
+    formats = list(info["formats"])
+    ydl.sort_formats({"formats": formats, "_format_sort_fields": info.get("_format_sort_fields")})
+    selector = ydl.build_format_selector(opts["format"])
+    # Ugyanaz a környezet, amit a YoutubeDL._select_formats ad a választónak.
+    return next(iter(selector({
+        "formats": formats,
+        "has_merged_format": any("none" not in (f.get("acodec"), f.get("vcodec")) for f in formats),
+        "incomplete_formats": all(f.get("vcodec") == "none" for f in formats) or all(f.get("acodec") == "none" for f in formats),
+    })), None)
+
+
 class _SilentLogger:
     def debug(self, msg: str) -> None: ...
     def info(self, msg: str) -> None: ...
@@ -361,7 +439,14 @@ def probe(url: str, tools: Tools | None = None, playlist: bool = False) -> Video
     if tools.js_runtimes:
         opts["js_runtimes"] = tools.js_runtimes
     with yt_dlp.YoutubeDL(opts) as ydl:
-        return summarize(ydl.extract_info(url, download=False))
+        info = ydl.extract_info(url, download=False)
+        summary = summarize(info)
+        if summary.kind != "video" or not info.get("formats"):
+            return summary
+        try:
+            return replace(summary, qualities=available_qualities(ydl, info, tools))
+        except Exception:  # noqa: BLE001 - a yt-dlp belső választója; ha változik, a felület a fix listát mutatja
+            return summary
 
 
 # --- Futtatás ---------------------------------------------------------------

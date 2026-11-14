@@ -21,16 +21,6 @@ class Mode(Enum):
     AUDIO = "audio"  # MP3
 
 
-# A felirat a GUI-ban, az érték a maximális képmagasság (None = nincs korlát).
-VIDEO_QUALITIES: dict[str, int | None] = {
-    "Legjobb elérhető": None,
-    "2160p (4K)": 2160,
-    "1440p": 1440,
-    "1080p": 1080,
-    "720p": 720,
-    "480p": 480,
-}
-
 MP3_BITRATE = "320K"
 
 
@@ -61,6 +51,7 @@ class Progress:
     eta: int | None  # másodperc
     filename: str
     item: str  # pl. "2/15" lejátszási listánál, különben üres
+    kind: str  # "video" | "audio" – melyik sáv töltődik épp
 
 
 @dataclass(frozen=True)
@@ -177,6 +168,74 @@ def build_ydl_opts(request: DownloadRequest, tools: Tools) -> dict:
     return opts
 
 
+# --- Előnézet ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VideoInfo:
+    kind: str  # "video" | "playlist"
+    title: str
+    uploader: str
+    thumbnail: str | None
+    duration: int | None = None  # másodperc
+    max_height: int | None = None
+    count: int | None = None  # lejátszási lista elemszáma
+
+
+def summarize(info: dict) -> VideoInfo:
+    """A yt-dlp info dictből az előnézethez szükséges adatok."""
+    thumbnails = [t for t in info.get("thumbnails") or [] if t.get("url")]
+    thumbnail = info.get("thumbnail") or (thumbnails[-1]["url"] if thumbnails else None)
+    uploader = info.get("uploader") or info.get("channel") or ""
+
+    if info.get("_type") == "playlist":
+        entries = list(info.get("entries") or [])
+        if not thumbnail and entries:
+            first = (entries[0].get("thumbnails") or [{}])[-1]
+            thumbnail = first.get("url")
+        return VideoInfo(
+            kind="playlist",
+            title=info.get("title") or "Lejátszási lista",
+            uploader=uploader,
+            thumbnail=thumbnail,
+            count=info.get("playlist_count") or len(entries) or None,
+        )
+
+    heights = [f["height"] for f in info.get("formats") or [] if f.get("height") and f.get("vcodec") != "none"]
+    return VideoInfo(
+        kind="video",
+        title=info.get("title") or "",
+        uploader=uploader,
+        thumbnail=thumbnail,
+        duration=int(info["duration"]) if info.get("duration") else None,
+        max_height=max(heights) if heights else None,
+    )
+
+
+class _SilentLogger:
+    def debug(self, msg: str) -> None: ...
+    def info(self, msg: str) -> None: ...
+    def warning(self, msg: str) -> None: ...
+    def error(self, msg: str) -> None: ...
+
+
+def probe(url: str, tools: Tools | None = None) -> VideoInfo:
+    """Letöltés nélkül lekéri a videó vagy lejátszási lista adatait. Hiba esetén DownloadError."""
+    tools = tools or find_tools()
+    opts: dict = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "extract_flat": "in_playlist",
+        "logger": _SilentLogger(),
+    }
+    if tools.js_runtimes:
+        opts["js_runtimes"] = tools.js_runtimes
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return summarize(ydl.extract_info(url, download=False))
+
+
 # --- Futtatás ---------------------------------------------------------------
 
 
@@ -274,14 +333,15 @@ class Downloader:
         index, count = info.get("playlist_index"), info.get("n_entries")
         item = f"{index}/{count}" if index and count else ""
         filename = Path(d.get("filename") or "").name
+        kind = "audio" if info.get("vcodec") == "none" else "video"
 
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             done = d.get("downloaded_bytes") or 0
             percent = done / total * 100 if total else None
-            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item))
+            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item, kind))
         elif d["status"] == "finished":
-            self._emit(Progress(100.0, None, None, filename, item))
+            self._emit(Progress(100.0, None, None, filename, item, kind))
 
     def _on_postprocess(self, files: list[str]) -> Callable[[dict], None]:
         def hook(d: dict) -> None:

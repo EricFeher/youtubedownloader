@@ -1,2 +1,2 @@
 yt-dlp[default]>=2026.10.26
-customtkinter>=6.0
+pywebview>=6.2

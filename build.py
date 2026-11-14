@@ -79,7 +79,7 @@ def main() -> None:
         "--noconfirm",
         "--clean",
         "--onefile" if args.onefile else "--onedir",
-        "--collect-data", "customtkinter",
+        "--add-data", f"{ROOT / 'ytletolto' / 'web'}{os.pathsep}ytletolto/web",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),
@@ -87,8 +87,6 @@ def main() -> None:
     icon = ROOT / "assets" / ("icon.ico" if sys.platform == "win32" else "icon.png")
     if icon.is_file():
         pyinstaller_args += ["--icon", str(icon)]
-    if (ROOT / "assets" / "icon.ico").is_file():
-        pyinstaller_args += ["--add-data", f"{ROOT / 'assets' / 'icon.ico'}{os.pathsep}."]
     for binary in vendor_binaries():
         pyinstaller_args += ["--add-binary", binary]
 

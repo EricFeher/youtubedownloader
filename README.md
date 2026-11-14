@@ -10,7 +10,8 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
 - **Csak hang (MP3)**: a legjobb hangsávból 320 kbps MP3, borítóképpel és metaadatokkal (cím, előadó).
 - Link beillesztése után előnézet: borítókép, cím, csatorna, hossz és a legjobb elérhető felbontás.
 - Lejátszási lista letöltése, folyamatjelző sebességgel és hátralévő idővel, megszakítás.
-- Megjegyzi a mentési mappát és az utoljára választott formátumot. Sötét és világos téma a rendszer szerint.
+- Megjegyzi a mentési mappát és az utoljára választott formátumot.
+- A MediaMinds arculatában készült: sötét felület, zöld színátmenet, Outfit betűtípus és MediaMinds logó.
 
 ## Használat Windows-on
 
@@ -54,6 +55,8 @@ A PyInstaller nem tud keresztfordítani, ezért Windows-os `.exe` csak Windows-o
   böngészőmotorjával jelenít meg egy natív ablakban (Windows: Edge WebView2, macOS: WebKit). A JS a
   `window.pywebview.api`-n keresztül hívja a Python `Api` osztályát (`ytletolto/app.py`). Hosztolt
   backend nem kell, minden a gépeden fut.
+- A betűtípus (Outfit, SIL Open Font License) a csomagban van (`ytletolto/web/fonts/`), így internet nélkül is
+  ugyanúgy néz ki.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) végzi a letöltést; az ffmpeg fűzi össze a videót a hanggal, és ez készíti az MP3-at.
 - A YouTube-hoz a yt-dlp-nek JavaScript futtatókörnyezet (Deno) kell, enélkül csak korlátozott formátumok érhetők el.
 - Ha a letöltés egy napon hirtelen elromlik, általában a YouTube változott: frissítsd a yt-dlp-t

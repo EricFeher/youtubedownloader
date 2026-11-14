@@ -213,7 +213,7 @@ def main() -> None:
         width=820,
         height=900,
         min_size=(600, 700),
-        background_color="#0c0b12",
+        background_color="#242424",
     )
     api.attach(window)
     window.events.closing += api.on_closing

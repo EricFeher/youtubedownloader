@@ -61,7 +61,15 @@ python build.py --onefile   # dist/YTLetolto.exe egyetlen fájlként
 
 Windows-on a `build.py` automatikusan letölti az ffmpeg-et és a Deno-t a `vendor/` mappába, és beépíti őket.
 A PyInstaller nem tud keresztfordítani, ezért Windows-os `.exe` csak Windows-on készülhet. Erre való a
-`.github/workflows/build-windows.yml`: minden `main`-re pusholáskor felépíti, `v*` tagnél Release-t is készít.
+`.github/workflows/build-windows.yml`: csak `v*` tag pusholásakor indul. Lefuttatja a teszteket,
+felépíti és ellenőrzi a Windows-csomagokat, majd a taghez GitHub Release-t készít a ZIP-pel és az EXE-vel.
+
+Új verzió kiadásához a kiadandó `main` commiton (például az első kiadásnál):
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## Hogyan működik
 

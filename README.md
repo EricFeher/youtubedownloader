@@ -15,7 +15,11 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
     Az Opus a legjobb elérhető hangminőség.
   - **WAV**: tömörítetlen, vágó- és DJ-programokhoz, borítókép nélkül. Nem szól jobban a forrásnál, csak nagyobb.
 - Link beillesztése után előnézet: borítókép, cím, csatorna, hossz és a legjobb elérhető felbontás.
-- Lejátszási lista letöltése, folyamatjelző sebességgel és hátralévő idővel, megszakítás.
+- Lejátszási lista letöltése: a lista elemei megjelennek, és elemenként választható, hogy **videó** (alapértelmezett)
+  vagy **csak hang** legyen belőle; „Mind videó” / „Mind hang” gombbal egyszerre is átállítható. A fájlok a lista
+  nevű mappába kerülnek, az eredeti sorszámukkal. Listához tartozó videó linkjénél a „Teljes lejátszási lista”
+  kapcsolóval érhető el.
+- Folyamatjelző sebességgel és hátralévő idővel, megszakítás.
 - Megjegyzi a mentési mappát és az utoljára választott beállításokat.
 - A MediaMinds arculatában készült: sötét felület, zöld színátmenet, Outfit betűtípus és MediaMinds logó.
 

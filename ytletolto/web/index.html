@@ -51,10 +51,30 @@
       <p class="inline-error" id="probe-error" hidden></p>
     </section>
 
+    <section class="card playlist-card" id="playlist-card" aria-label="A lejátszási lista elemei" hidden>
+      <div class="playlist-head">
+        <div>
+          <h3 class="card-title">A lista elemei</h3>
+          <p class="hint" id="playlist-summary"></p>
+        </div>
+        <div class="playlist-bulk">
+          <button type="button" class="btn btn-ghost btn-sm" data-all="video">Mind videó</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-all="audio">Mind hang</button>
+        </div>
+      </div>
+      <ol class="playlist-items" id="playlist-items"></ol>
+      <div class="playlist-loading" id="playlist-loading" hidden>
+        <div class="line shimmer"></div>
+        <div class="line shimmer"></div>
+        <div class="line shimmer"></div>
+      </div>
+      <p class="inline-error" id="playlist-error" hidden></p>
+    </section>
+
     <!-- autocomplete="off": a motor ne állítsa vissza az űrlapot a mentett beállítások helyett -->
     <form class="card" autocomplete="off" onsubmit="return false">
-      <h3 class="card-title">Formátum</h3>
-      <div class="format-grid" role="radiogroup">
+      <h3 class="card-title" id="mode-title">Formátum</h3>
+      <div class="format-grid" role="radiogroup" id="mode-grid">
         <label class="format-option">
           <input type="radio" name="mode" value="video" checked>
           <span class="format-box">
@@ -72,7 +92,7 @@
       </div>
 
       <div class="format-options" id="video-options">
-        <h3 class="card-title">Fájlformátum</h3>
+        <h3 class="card-title" id="video-format-title">Fájlformátum</h3>
         <div class="chips" role="radiogroup" id="container">
           <label><input type="radio" name="container" value="mp4" checked><span>MP4</span></label>
           <label><input type="radio" name="container" value="mkv"><span>MKV</span></label>
@@ -99,7 +119,7 @@
       </div>
 
       <div class="format-options" id="audio-options" hidden>
-        <h3 class="card-title">Fájlformátum</h3>
+        <h3 class="card-title" id="audio-format-title">Fájlformátum</h3>
         <div class="chips" role="radiogroup" id="audio-format">
           <label><input type="radio" name="audio_format" value="mp3" checked><span>MP3</span></label>
           <label><input type="radio" name="audio_format" value="m4a"><span>M4A</span></label>
@@ -112,7 +132,7 @@
       <label class="switch-row" id="playlist-row" hidden>
         <span>
           <strong>Teljes lejátszási lista</strong>
-          <small>A videó egy lejátszási listához tartozik. Bekapcsolva a teljes listát letölti, nem csak ezt a videót.</small>
+          <small>A videó egy lejátszási listához tartozik. Bekapcsolva a teljes listát letölti, nem csak ezt a videót; elemenként választhatsz videót vagy hangot.</small>
         </span>
         <input type="checkbox" id="playlist" class="switch">
       </label>

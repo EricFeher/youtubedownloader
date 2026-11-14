@@ -33,6 +33,7 @@ from .downloader import (
     Progress,
     find_tools,
     probe,
+    split_by_mode,
 )
 
 APP_TITLE = "YT Letöltő"
@@ -63,9 +64,9 @@ class Api:
             "js_runtime": bool(self._tools.js_runtimes),
         }
 
-    def probe(self, url: str) -> dict:
+    def probe(self, url: str, playlist: bool = False) -> dict:
         try:
-            return {"ok": True, "info": dataclasses.asdict(probe(url.strip(), self._tools))}
+            return {"ok": True, "info": dataclasses.asdict(probe(url.strip(), self._tools, bool(playlist)))}
         except DownloadError as e:
             return {"ok": False, "error": _short_error(str(e))}
         except Exception as e:  # noqa: BLE001 - a felületnek minden hibáról tudnia kell
@@ -121,6 +122,9 @@ class Api:
                 container=container,
                 audio_format=audio_format,
             )
+            requests = split_by_mode(request, options.get("items"))
+            if not requests:
+                return {"ok": False, "error": "A listában nincs letölthető elem."}
             self.save_settings(
                 {
                     "mode": request.mode.value,
@@ -131,7 +135,7 @@ class Api:
                 }
             )
             self._downloader = Downloader(self._emit, self._tools)
-            threading.Thread(target=self._run, args=(self._downloader, request), daemon=True).start()
+            threading.Thread(target=self._run, args=(self._downloader, requests), daemon=True).start()
         return {"ok": True}
 
     def cancel(self) -> None:
@@ -141,9 +145,9 @@ class Api:
 
     # --- Belső -------------------------------------------------------------
 
-    def _run(self, downloader: Downloader, request: DownloadRequest) -> None:
+    def _run(self, downloader: Downloader, requests: list[DownloadRequest]) -> None:
         try:
-            downloader.run(request)
+            downloader.run(*requests)
         finally:
             with self._lock:
                 self._downloader = None

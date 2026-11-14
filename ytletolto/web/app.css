@@ -297,6 +297,50 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .switch:focus-visible { outline: 2px solid var(--green-light); outline-offset: 3px; }
 
 
+/* Lejátszási lista elemei */
+.playlist-card { animation: rise 0.35s var(--ease); }
+.playlist-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.playlist-head .hint { margin: 8px 0 0; }
+.playlist-bulk { display: flex; gap: 8px; }
+.playlist-items {
+  list-style: none;
+  margin: 0 -8px;
+  padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.playlist-item { display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 12px; transition: background 0.2s var(--ease); }
+.playlist-item:hover { background: var(--surface); }
+.playlist-index { flex: none; width: 28px; text-align: right; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.playlist-thumb { flex: none; width: 64px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--surface-strong); }
+.playlist-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.playlist-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.playlist-text small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.playlist-loading { display: flex; flex-direction: column; gap: 10px; }
+.playlist-loading .line { height: 36px; border-radius: 12px; margin: 0; }
+
+.segmented { flex: none; display: inline-flex; padding: 3px; border: 1px solid var(--border-strong); border-radius: 50px; }
+.segmented button {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 50px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  background: none;
+  cursor: pointer;
+  transition: color 0.2s var(--ease), background 0.2s var(--ease);
+}
+.segmented button:hover { color: var(--green-light); }
+.segmented button[aria-pressed="true"] { color: var(--on-gradient); background: var(--gradient); }
+.segmented button:focus-visible { outline: 2px solid var(--green-light); outline-offset: 2px; }
+.segmented button:disabled { cursor: not-allowed; opacity: 0.6; }
+
 .folder-row {
   display: flex;
   align-items: center;
@@ -367,6 +411,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 @media (max-width: 560px) {
   .preview { grid-template-columns: 1fr; }
   .format-grid { grid-template-columns: 1fr; }
+  .playlist-thumb { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

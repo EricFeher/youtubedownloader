@@ -37,6 +37,28 @@ def test_summarize_playlist_falls_back_to_first_entry_thumbnail():
     assert result.thumbnail == "https://img/big.jpg"
 
 
+def test_summarize_playlist_lists_entries_with_their_position():
+    info = {
+        "_type": "playlist",
+        "title": "Lista",
+        "entries": [
+            {"id": "a", "title": "Első", "duration": 61.9, "thumbnails": [{"url": "https://img/a-small.jpg"}, {"url": "https://img/a-big.jpg"}]},
+            None,  # elérhetetlen elem: a sorszáma foglalt marad
+            {"id": "c", "title": None},
+        ],
+    }
+
+    entries = summarize(info).entries
+
+    assert [(e.index, e.id, e.title) for e in entries] == [(1, "a", "Első"), (3, "c", "c")]
+    assert (entries[0].duration, entries[0].thumbnail) == (61, "https://img/a-small.jpg")
+    assert (entries[1].duration, entries[1].thumbnail) == (None, None)
+
+
+def test_summarize_video_has_no_entries():
+    assert summarize({"title": "Klip"}).entries == ()
+
+
 def test_settings_roundtrip_ignores_unknown_keys(tmp_path):
     path = tmp_path / "settings.json"
     settings.save({"output_dir": str(tmp_path), "mode": "audio", "quality": "1080", "compatible": True, "container": "mkv", "audio_format": "opus", "x": 1}, path)

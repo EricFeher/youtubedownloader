@@ -1,15 +1,18 @@
 from pathlib import Path
 
 import pytest
+import yt_dlp
 
 from ytletolto.downloader import (
     Downloader,
     DownloadRequest,
     Finished,
     Mode,
+    Progress,
     Tools,
     build_ydl_opts,
     find_tools,
+    split_by_mode,
 )
 
 TOOLS = Tools(ffmpeg_dir=Path("/opt/ffmpeg"), js_runtimes={"deno": {"path": r"C:\app\deno.exe"}})
@@ -133,4 +136,95 @@ def test_missing_ffmpeg_reports_error_without_downloading():
     assert len(events) == 1
     assert isinstance(events[0], Finished) and not events[0].ok
     assert "ffmpeg" in events[0].message
+
+
+def test_playlist_items_are_passed_to_yt_dlp():
+    opts = build_ydl_opts(request(playlist=True, playlist_items=(1, 3, 7)), TOOLS)
+
+    assert opts["playlist_items"] == "1,3,7"
+
+
+def test_playlist_items_are_ignored_for_single_video():
+    opts = build_ydl_opts(request(playlist_items=(1, 3)), TOOLS)
+
+    assert opts.get("playlist_items") is None
+
+
+def test_split_by_mode_groups_items_and_defaults_to_video():
+    base = request(playlist=True, mode=Mode.AUDIO)
+    items = [
+        {"index": 3, "mode": "audio"},
+        {"index": 1, "mode": "video"},
+        {"index": 2},  # mód nélkül: videó
+        {"index": 5, "mode": "audio"},
+        {"index": 1, "mode": "audio"},  # ismétlődő sorszám: az első számít
+        {"index": 0, "mode": "audio"},  # érvénytelen
+        {"index": True, "mode": "audio"},  # érvénytelen
+        "szemét",
+    ]
+
+    video, audio = split_by_mode(base, items)
+
+    assert (video.mode, video.playlist_items) == (Mode.VIDEO, (1, 2))
+    assert (audio.mode, audio.playlist_items) == (Mode.AUDIO, (3, 5))
+    assert video.playlist and audio.playlist
+
+
+def test_split_by_mode_skips_empty_group():
+    (only,) = split_by_mode(request(playlist=True), [{"index": 1, "mode": "audio"}, {"index": 2, "mode": "audio"}])
+
+    assert (only.mode, only.playlist_items) == (Mode.AUDIO, (1, 2))
+
+
+def test_split_by_mode_keeps_request_without_items():
+    single = request()
+    whole_list = request(playlist=True, mode=Mode.AUDIO)
+
+    assert split_by_mode(single, [{"index": 1, "mode": "audio"}]) == [single]
+    assert split_by_mode(whole_list, None) == [whole_list]
+    assert split_by_mode(whole_list, []) == []
+
+
+class FakeYDL(yt_dlp.YoutubeDL):
+    """A yt-dlp helyett: minden kért elemre jelent egy kész letöltést és egy áthelyezett fájlt.
+
+    Alosztály, mert a `parse_options` is a `yt_dlp.YoutubeDL` osztálymetódusait hívja.
+    """
+
+    runs: list[dict] = []
+
+    def __init__(self, opts: dict):
+        self.opts = opts
+        FakeYDL.runs.append(opts)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def download(self, url_list):
+        indexes = [int(i) for i in self.opts["playlist_items"].split(",")]
+        for number, index in enumerate(indexes, start=1):
+            info = {"playlist_index": index, "playlist_autonumber": number, "n_entries": len(indexes), "vcodec": "none"}
+            self.opts["progress_hooks"][0]({"status": "finished", "filename": f"{index}.x", "info_dict": info})
+            self.opts["postprocessor_hooks"][0]({"status": "finished", "postprocessor": "MoveFiles", "info_dict": {"filepath": f"/out/{index}"}})
+        return 0
+
+
+def test_run_downloads_video_and_audio_items_in_sequence(monkeypatch, tmp_path):
+    monkeypatch.setattr("ytletolto.downloader.yt_dlp.YoutubeDL", FakeYDL)
+    FakeYDL.runs = []
+    events = []
+    base = request(playlist=True, output_dir=tmp_path)
+    requests = split_by_mode(base, [{"index": 1}, {"index": 2, "mode": "audio"}, {"index": 3}])
+
+    Downloader(events.append, TOOLS).run(*requests)
+
+    assert [opts["playlist_items"] for opts in FakeYDL.runs] == ["1,3", "2"]
+    assert "FFmpegExtractAudio" not in pp_keys(FakeYDL.runs[0])
+    assert "FFmpegExtractAudio" in pp_keys(FakeYDL.runs[1])
+    progress = [(e.item, e.mode) for e in events if isinstance(e, Progress)]
+    assert progress == [("1/3", "video"), ("2/3", "video"), ("3/3", "audio")]
+    assert events[-1] == Finished(True, "Kész!", ("/out/1", "/out/3", "/out/2"))
 

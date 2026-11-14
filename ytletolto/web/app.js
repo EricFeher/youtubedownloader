@@ -19,9 +19,17 @@ const el = {
   cancel: $("cancel-btn"), result: $("result"), resultIcon: $("result-icon"),
   resultTitle: $("result-title"), files: $("files"), resultClose: $("result-close"),
   log: $("log"), toolsWarning: $("tools-warning"),
+  modeTitle: $("mode-title"), modeGrid: $("mode-grid"),
+  videoFormatTitle: $("video-format-title"), audioFormatTitle: $("audio-format-title"),
+  playlistCard: $("playlist-card"), playlistItems: $("playlist-items"), playlistSummary: $("playlist-summary"),
+  playlistLoading: $("playlist-loading"), playlistError: $("playlist-error"),
 };
 
-const state = { probeToken: 0, probedUrl: "", downloading: false, maxHeight: null, isPlaylist: false };
+const state = {
+  probeToken: 0, probedUrl: "", downloading: false, maxHeight: null, isPlaylist: false,
+  // A lista elemei és elemenként a választott mód ("video" | "audio"); alapból minden videó.
+  playlistToken: 0, playlistUrl: "", entries: [], itemModes: new Map(),
+};
 
 const radios = (name) => [...document.querySelectorAll(`input[name="${name}"]`)];
 const radioValue = (name) => radios(name).find((r) => r.checked)?.value;
@@ -77,6 +85,7 @@ function clearPreview() {
   state.isPlaylist = false;
   state.maxHeight = null;
   updateQualityLimits(null);
+  clearPlaylist();
 }
 
 async function runProbe() {
@@ -111,6 +120,7 @@ function showPreview(info, url) {
     el.kind.textContent = info.count ? `Lejátszási lista · ${info.count} videó` : "Lejátszási lista";
     el.badge.hidden = el.duration.hidden = true;
     el.playlistRow.hidden = true; // tiszta lista-link: mindenképp a teljes listát töltjük le
+    showPlaylist(info.entries, url);
   } else {
     el.kind.textContent = "Videó";
     el.badge.textContent = heightLabel(info.max_height);
@@ -119,12 +129,154 @@ function showPreview(info, url) {
     el.duration.hidden = !info.duration;
     el.playlistRow.hidden = !hasPlaylist(url);
     el.playlist.checked = false;
+    clearPlaylist();
   }
   state.isPlaylist = info.kind === "playlist";
   state.maxHeight = info.kind === "video" ? info.max_height : null;
   updateQualityLimits(state.maxHeight);
   el.preview.hidden = false;
+  applyMode();
 }
+
+// --- Lejátszási lista elemei ---------------------------------------------------
+
+const playlistSelected = () => state.isPlaylist || (!el.playlistRow.hidden && el.playlist.checked);
+// Elemenkénti választás csak akkor van, ha a lista elemeit sikerült lekérni; különben a teljes lista egy módban megy.
+const perItemMode = () => playlistSelected() && state.entries.length > 0;
+const itemMode = (index) => state.itemModes.get(index) ?? "video";
+
+function modeCounts() {
+  const audio = state.entries.filter((e) => itemMode(e.index) === "audio").length;
+  return { video: state.entries.length - audio, audio };
+}
+
+function clearPlaylist() {
+  state.playlistToken++;
+  state.playlistUrl = "";
+  state.entries = [];
+  state.itemModes = new Map();
+  el.playlistItems.replaceChildren();
+  el.playlistCard.hidden = el.playlistLoading.hidden = el.playlistError.hidden = true;
+}
+
+function showPlaylist(entries, url) {
+  state.playlistToken++;
+  state.playlistUrl = url;
+  state.entries = entries || [];
+  state.itemModes = new Map();
+  el.playlistLoading.hidden = el.playlistError.hidden = true;
+  el.playlistItems.replaceChildren(...state.entries.map(playlistRow));
+  el.playlistCard.hidden = state.entries.length === 0;
+  updatePlaylistSummary();
+}
+
+function playlistRow(entry) {
+  const li = document.createElement("li");
+  li.className = "playlist-item";
+  li.dataset.index = entry.index;
+
+  const number = document.createElement("span");
+  number.className = "playlist-index";
+  number.textContent = entry.index;
+
+  const thumb = document.createElement("img");
+  thumb.className = "playlist-thumb";
+  thumb.alt = "";
+  thumb.loading = "lazy";
+  if (entry.thumbnail) thumb.src = entry.thumbnail;
+
+  const text = document.createElement("span");
+  text.className = "playlist-text";
+  const title = document.createElement("span");
+  title.className = "playlist-title";
+  title.textContent = entry.title;
+  title.title = entry.title;
+  text.append(title);
+  if (entry.duration) {
+    const duration = document.createElement("small");
+    duration.textContent = formatDuration(entry.duration);
+    text.append(duration);
+  }
+
+  const toggle = document.createElement("span");
+  toggle.className = "segmented";
+  toggle.setAttribute("role", "group");
+  toggle.setAttribute("aria-label", `${entry.index}. elem formátuma`);
+  for (const [mode, label] of [["video", "Videó"], ["audio", "Hang"]]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.mode = mode;
+    btn.textContent = label;
+    btn.setAttribute("aria-pressed", String(mode === "video"));
+    toggle.append(btn);
+  }
+
+  li.append(number, thumb, text, toggle);
+  return li;
+}
+
+function setItemMode(li, mode) {
+  state.itemModes.set(Number(li.dataset.index), mode);
+  li.querySelectorAll("button[data-mode]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+}
+
+function updatePlaylistSummary() {
+  const { video, audio } = modeCounts();
+  el.playlistSummary.textContent = `${state.entries.length} elem · ${video} videó, ${audio} hang`;
+  applyMode();
+}
+
+el.playlistItems.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-mode]");
+  if (!btn || state.downloading) return;
+  setItemMode(btn.closest(".playlist-item"), btn.dataset.mode);
+  updatePlaylistSummary();
+});
+
+el.playlistCard.querySelectorAll("button[data-all]").forEach((btn) => btn.addEventListener("click", () => {
+  el.playlistItems.querySelectorAll(".playlist-item").forEach((li) => setItemMode(li, btn.dataset.all));
+  updatePlaylistSummary();
+}));
+
+// Listához tartozó videó linkjénél a lista elemeit csak a kapcsoló bekapcsolásakor kérjük le.
+async function loadPlaylist() {
+  const url = el.url.value.trim();
+  if (state.playlistUrl === url && state.entries.length) {
+    el.playlistCard.hidden = false;
+    applyMode();
+    return;
+  }
+  clearPlaylist();
+  const token = state.playlistToken;
+  el.playlistCard.hidden = el.playlistLoading.hidden = false;
+  el.playlistSummary.textContent = "Lista betöltése…";
+  applyMode();
+
+  const res = await api().probe(url, true);
+  if (token !== state.playlistToken) return; // közben új link érkezett, vagy kikapcsolták
+  el.playlistLoading.hidden = true;
+  if (!res.ok || res.info.kind !== "playlist" || !res.info.entries.length) {
+    // Az elemek nélkül is letölthető a lista, csak egységesen a felül választott módban.
+    el.playlistSummary.textContent = "";
+    el.playlistError.textContent = `${res.ok ? "A lista elemei nem érhetők el" : res.error}. A teljes lista a választott formátumban töltődik le.`;
+    el.playlistError.hidden = false;
+    applyMode();
+    return;
+  }
+  showPlaylist(res.info.entries, url);
+}
+
+el.playlist.addEventListener("change", () => {
+  if (el.playlist.checked) {
+    loadPlaylist();
+  } else {
+    state.playlistToken++; // a folyamatban lévő lekérés eredményét eldobjuk
+    el.playlistLoading.hidden = true;
+    if (!state.entries.length) state.playlistUrl = "";
+    el.playlistCard.hidden = true;
+    applyMode();
+  }
+});
 
 // A videónál nem elérhető felbontások letiltása.
 function updateQualityLimits(maxHeight) {
@@ -170,12 +322,20 @@ function applyMode() {
   const audio = radioValue("mode") === "audio";
   const container = CONTAINERS[radioValue("container")] ?? CONTAINERS.mp4;
   const audioFormat = AUDIO_FORMATS[radioValue("audio_format")] ?? AUDIO_FORMATS.mp3;
-  el.videoOptions.hidden = audio;
-  el.audioOptions.hidden = !audio;
+  // Elemenkénti választásnál nincs közös mód: azokat a beállításokat mutatjuk, amelyik módot valamelyik elem használja.
+  const perItem = perItemMode();
+  const counts = perItem ? modeCounts() : null;
+  el.modeTitle.hidden = el.modeGrid.hidden = perItem;
+  el.videoOptions.hidden = perItem ? counts.video === 0 : audio;
+  el.audioOptions.hidden = perItem ? counts.audio === 0 : !audio;
+  el.videoFormatTitle.textContent = perItem ? "Videók fájlformátuma" : "Fájlformátum";
+  el.audioFormatTitle.textContent = perItem ? "Hangok fájlformátuma" : "Fájlformátum";
   el.containerHint.textContent = container.hint;
   el.audioFormatHint.textContent = audioFormat.hint;
   el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
-  el.download.querySelector("#download-label").textContent = `${(audio ? audioFormat : container).label} letöltése`;
+  el.download.querySelector("#download-label").textContent = perItem
+    ? `${state.entries.length} elem letöltése`
+    : `${(audio ? audioFormat : container).label} letöltése`;
 }
 
 radios("mode").forEach((r) => r.addEventListener("change", () => {
@@ -223,7 +383,8 @@ function setIndeterminate(on) {
 }
 
 async function startDownload() {
-  if (state.downloading) return;
+  // Amíg a lista elemei töltődnek, még nem tudjuk, melyik elem hogyan menjen.
+  if (state.downloading || !el.playlistLoading.hidden) return;
   const url = el.url.value.trim();
   if (!url) { el.url.focus(); return; }
 
@@ -235,7 +396,8 @@ async function startDownload() {
     container: radioValue("container"),
     audio_format: radioValue("audio_format"),
     compatible: el.compatible.checked,
-    playlist: state.isPlaylist || (!el.playlistRow.hidden && el.playlist.checked),
+    playlist: playlistSelected(),
+    items: perItemMode() ? state.entries.map((e) => ({ index: e.index, mode: itemMode(e.index) })) : null,
   });
   if (!res.ok) { showResult(false, res.error, []); return; }
 
@@ -280,7 +442,7 @@ el.resultClose.addEventListener("click", () => { el.result.hidden = true; });
 
 const handlers = {
   progress(e) {
-    const audioMode = radioValue("mode") === "audio";
+    const audioMode = e.mode === "audio";
     const what = audioMode ? "Hang letöltése" : e.kind === "audio" ? "Hangsáv letöltése" : "Videósáv letöltése";
     el.progressLabel.textContent = e.item ? `${e.item} · ${what}` : what;
     if (e.percent == null) {

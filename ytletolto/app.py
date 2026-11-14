@@ -14,7 +14,6 @@ import json
 import os
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -22,18 +21,16 @@ import webview
 from yt_dlp.utils import DownloadError
 
 from . import settings as settings_store
-from .downloader import (
-    AUDIO_FORMATS,
-    VIDEO_CONTAINERS,
-    Downloader,
-    DownloadRequest,
-    Event,
-    Finished,
-    Mode,
-    Progress,
-    find_tools,
-    probe,
+from .download_queue import (
+    DownloadQueue,
+    ItemEvent,
+    QueueEvent,
+    build_request,
+    event_payload,
+    extract_urls,
+    is_playlist_url,
 )
+from .downloader import Downloader, Progress, find_tools, probe
 
 APP_TITLE = "YT Letöltő"
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -47,8 +44,7 @@ class Api:
         self._window: webview.Window | None = None
         self._tools = find_tools()
         self._settings = settings_store.load()
-        self._downloader: Downloader | None = None
-        self._lock = threading.Lock()
+        self._queue = DownloadQueue(self._emit, lambda emit: Downloader(emit, self._tools))
         self._last_progress = 0.0
 
     def attach(self, window: webview.Window) -> None:
@@ -61,6 +57,7 @@ class Api:
             "settings": self._settings,
             "ffmpeg": bool(self._tools.ffmpeg_dir),
             "js_runtime": bool(self._tools.js_runtimes),
+            "queue": event_payload(self._queue.snapshot()),
         }
 
     def probe(self, url: str) -> dict:
@@ -73,6 +70,9 @@ class Api:
 
     def paste(self) -> str:
         return read_clipboard()
+
+    def split_urls(self, text: str) -> list[str]:
+        return extract_urls(text or "")
 
     def choose_folder(self) -> str | None:
         if not self._window:
@@ -96,73 +96,64 @@ class Api:
         self._settings.update({k: v for k, v in changes.items() if k in settings_store.DEFAULTS})
         settings_store.save(self._settings)
 
-    def start(self, options: dict) -> dict:
-        url = (options.get("url") or "").strip()
-        if not url:
+    def enqueue(self, options: dict) -> dict:
+        """Sorba állítja a linkeket (`items`: url, és ha az előnézetből ismert: title, thumbnail, playlist).
+
+        Ha a `playlist` hiányzik (pl. több beillesztett linknél), a link alakjából döntjük el.
+        """
+        output_dir = Path(self._settings["output_dir"])
+        entries = []
+        for entry in options.get("items") or []:
+            url = str(entry.get("url") or "").strip()
+            if not url:
+                continue
+            playlist = entry.get("playlist")
+            playlist = is_playlist_url(url) if playlist is None else bool(playlist)
+            entries.append((build_request(url, options, output_dir, playlist), entry.get("title") or "", entry.get("thumbnail")))
+        if not entries:
             return {"ok": False, "error": "Adj meg egy linket."}
+        if not self._tools.ffmpeg_dir:
+            return {"ok": False, "error": "Az ffmpeg nem található. Telepítsd, vagy használd a csomagolt alkalmazást."}
 
-        with self._lock:
-            if self._downloader:
-                return {"ok": False, "error": "Már fut egy letöltés."}
-            quality = options.get("quality", "best")
-            container = options.get("container")
-            if container not in VIDEO_CONTAINERS:
-                container = VIDEO_CONTAINERS[0]
-            audio_format = options.get("audio_format")
-            if audio_format not in AUDIO_FORMATS:
-                audio_format = AUDIO_FORMATS[0]
-            request = DownloadRequest(
-                url=url,
-                output_dir=Path(self._settings["output_dir"]),
-                mode=Mode(options.get("mode", "video")),
-                max_height=None if quality == "best" else int(quality),
-                compatible=bool(options.get("compatible")),
-                playlist=bool(options.get("playlist")),
-                container=container,
-                audio_format=audio_format,
-            )
-            self.save_settings(
-                {
-                    "mode": request.mode.value,
-                    "quality": quality,
-                    "compatible": request.compatible,
-                    "container": container,
-                    "audio_format": audio_format,
-                }
-            )
-            self._downloader = Downloader(self._emit, self._tools)
-            threading.Thread(target=self._run, args=(self._downloader, request), daemon=True).start()
-        return {"ok": True}
+        added = sum(1 for item in self._queue.add_many(entries) if item)
+        request = entries[-1][0]
+        self.save_settings(
+            {
+                "mode": request.mode.value,
+                "quality": str(request.max_height) if request.max_height else "best",
+                "compatible": request.compatible,
+                "container": request.container,
+                "audio_format": request.audio_format,
+            }
+        )
+        return {"ok": True, "added": added, "skipped": len(entries) - added}
 
-    def cancel(self) -> None:
-        with self._lock:
-            if self._downloader:
-                self._downloader.cancel()
+    def cancel(self, item_id: int) -> bool:
+        return self._queue.cancel(int(item_id))
+
+    def remove(self, item_id: int) -> bool:
+        return self._queue.remove(int(item_id))
+
+    def retry(self, item_id: int) -> bool:
+        return self._queue.retry(int(item_id))
+
+    def clear_finished(self) -> int:
+        return self._queue.clear_finished()
 
     # --- Belső -------------------------------------------------------------
 
-    def _run(self, downloader: Downloader, request: DownloadRequest) -> None:
-        try:
-            downloader.run(request)
-        finally:
-            with self._lock:
-                self._downloader = None
-
-    def _emit(self, event: Event) -> None:
-        if isinstance(event, Progress) and event.percent != 100.0:
+    def _emit(self, event: QueueEvent) -> None:
+        if isinstance(event, ItemEvent) and isinstance(event.event, Progress) and event.event.percent != 100.0:
             now = time.monotonic()
             if now - self._last_progress < PROGRESS_INTERVAL:
                 return
             self._last_progress = now
         if not self._window:
             return
-        payload = {"type": type(event).__name__.lower(), **dataclasses.asdict(event)}
-        if isinstance(event, Finished):
-            payload["files"] = list(event.files)
-        self._window.evaluate_js(f"window.app && window.app.onEvent({json.dumps(payload)})")
+        self._window.evaluate_js(f"window.app && window.app.onEvent({json.dumps(event_payload(event))})")
 
     def on_closing(self) -> None:
-        self.cancel()
+        self._queue.shutdown()
 
 
 # --- Rendszerfunkciók --------------------------------------------------------

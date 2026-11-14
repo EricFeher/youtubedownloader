@@ -57,6 +57,7 @@ class Progress:
     filename: str
     item: str  # pl. "2/15" lejátszási listánál, különben üres
     kind: str  # "video" | "audio" – melyik sáv töltődik épp
+    title: str = ""  # a videó, lejátszási listánál a lista címe
 
 
 @dataclass(frozen=True)
@@ -370,14 +371,15 @@ class Downloader:
         item = f"{index}/{count}" if index and count else ""
         filename = Path(d.get("filename") or "").name
         kind = "audio" if info.get("vcodec") == "none" else "video"
+        title = (info.get("playlist_title") if item else None) or info.get("title") or ""
 
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             done = d.get("downloaded_bytes") or 0
             percent = done / total * 100 if total else None
-            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item, kind))
+            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item, kind, title))
         elif d["status"] == "finished":
-            self._emit(Progress(100.0, None, None, filename, item, kind))
+            self._emit(Progress(100.0, None, None, filename, item, kind, title))
 
     def _on_postprocess(self, files: list[str]) -> Callable[[dict], None]:
         def hook(d: dict) -> None:

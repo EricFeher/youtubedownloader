@@ -22,7 +22,7 @@
     <section class="hero">
       <form class="url-bar" id="url-form" autocomplete="off">
         <svg class="url-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></svg>
-        <input id="url" type="url" placeholder="Illeszd be a YouTube linket…" spellcheck="false" aria-label="YouTube link">
+        <input id="url" type="url" placeholder="Illeszd be a YouTube linket (akár többet is)…" spellcheck="false" aria-label="YouTube link">
         <button type="button" class="btn btn-ghost" id="paste-btn">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
           Beillesztés
@@ -48,7 +48,16 @@
           <div class="line shimmer" style="width: 45%"></div>
         </div>
       </div>
+      <div class="batch" id="batch" hidden>
+        <div class="batch-head">
+          <p class="eyebrow" id="batch-count"></p>
+          <button type="button" class="btn btn-ghost btn-sm" id="batch-clear">Mégse</button>
+        </div>
+        <ul class="batch-list" id="batch-list"></ul>
+      </div>
+
       <p class="inline-error" id="probe-error" hidden></p>
+      <p class="inline-note" id="notice" hidden></p>
     </section>
 
     <!-- autocomplete="off": a motor ne állítsa vissza az űrlapot a mentett beállítások helyett -->
@@ -130,27 +139,15 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0-5-5m5 5 5-5M5 20h14"/></svg>
         <span id="download-label">Letöltés</span>
       </button>
+    </section>
 
-      <div class="progress-card" id="progress" hidden>
-        <div class="progress-head">
-          <span id="progress-label">Előkészítés…</span>
-          <span class="progress-pct" id="progress-pct"></span>
-        </div>
-        <div class="bar"><div class="bar-fill" id="bar-fill"></div></div>
-        <div class="progress-foot">
-          <span class="muted" id="progress-meta"></span>
-          <button class="btn btn-ghost btn-sm" id="cancel-btn">Mégse</button>
-        </div>
+    <section class="card queue" id="queue" hidden>
+      <div class="queue-head">
+        <h3 class="card-title">Letöltési sor</h3>
+        <span class="queue-count" id="queue-count"></span>
+        <button type="button" class="btn btn-ghost btn-sm" id="clear-finished" hidden>Befejezettek törlése</button>
       </div>
-
-      <div class="result" id="result" hidden>
-        <div class="result-icon" id="result-icon"></div>
-        <div class="result-body">
-          <strong id="result-title"></strong>
-          <ul class="files" id="files"></ul>
-        </div>
-        <button class="btn btn-ghost btn-sm" id="result-close" aria-label="Bezárás">✕</button>
-      </div>
+      <ul class="queue-list" id="queue-list"></ul>
     </section>
 
     <details class="log">

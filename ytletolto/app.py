@@ -23,6 +23,7 @@ from yt_dlp.utils import DownloadError
 
 from . import settings as settings_store
 from .downloader import (
+    AUDIO_FORMATS,
     VIDEO_CONTAINERS,
     Downloader,
     DownloadRequest,
@@ -107,6 +108,9 @@ class Api:
             container = options.get("container")
             if container not in VIDEO_CONTAINERS:
                 container = VIDEO_CONTAINERS[0]
+            audio_format = options.get("audio_format")
+            if audio_format not in AUDIO_FORMATS:
+                audio_format = AUDIO_FORMATS[0]
             request = DownloadRequest(
                 url=url,
                 output_dir=Path(self._settings["output_dir"]),
@@ -115,9 +119,16 @@ class Api:
                 compatible=bool(options.get("compatible")),
                 playlist=bool(options.get("playlist")),
                 container=container,
+                audio_format=audio_format,
             )
             self.save_settings(
-                {"mode": request.mode.value, "quality": quality, "compatible": request.compatible, "container": container}
+                {
+                    "mode": request.mode.value,
+                    "quality": quality,
+                    "compatible": request.compatible,
+                    "container": container,
+                    "audio_format": audio_format,
+                }
             )
             self._downloader = Downloader(self._emit, self._tools)
             threading.Thread(target=self._run, args=(self._downloader, request), daemon=True).start()

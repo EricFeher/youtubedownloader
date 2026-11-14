@@ -79,6 +79,31 @@ def test_audio_extracts_320k_mp3():
     assert opts["merge_output_format"] is None
 
 
+def test_m4a_and_opus_prefer_matching_source_stream():
+    m4a = build_ydl_opts(request(mode=Mode.AUDIO, audio_format="m4a"), TOOLS)
+    opus = build_ydl_opts(request(mode=Mode.AUDIO, audio_format="opus"), TOOLS)
+
+    assert m4a["format"] == "bestaudio[ext=m4a]/bestaudio/best"
+    assert opus["format"] == "bestaudio[acodec=opus]/bestaudio/best"
+    for opts, codec in ((m4a, "m4a"), (opus, "opus")):
+        extract = next(pp for pp in opts["postprocessors"] if pp["key"] == "FFmpegExtractAudio")
+        assert extract["preferredcodec"] == codec
+        assert "EmbedThumbnail" in pp_keys(opts)
+
+
+def test_wav_skips_thumbnail():
+    opts = build_ydl_opts(request(mode=Mode.AUDIO, audio_format="wav"), TOOLS)
+
+    extract = next(pp for pp in opts["postprocessors"] if pp["key"] == "FFmpegExtractAudio")
+    assert extract["preferredcodec"] == "wav"
+    assert "EmbedThumbnail" not in pp_keys(opts)
+
+
+def test_unknown_audio_format_is_rejected():
+    with pytest.raises(ValueError):
+        build_ydl_opts(request(mode=Mode.AUDIO, audio_format="flac"), TOOLS)
+
+
 def test_paths_tools_and_playlist_template():
     opts = build_ydl_opts(request(playlist=True), TOOLS)
 

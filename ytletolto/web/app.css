@@ -222,7 +222,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   backdrop-filter: blur(12px);
 }
 .card-title { margin: 4px 0 -4px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
-#video-options { display: flex; flex-direction: column; gap: 14px; }
+.format-options { display: flex; flex-direction: column; gap: 14px; }
 .hint { margin: -4px 0 4px; color: var(--muted); font-size: 13px; }
 
 .format-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -296,7 +296,6 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .switch:checked::after { transform: translateX(20px); background: #000; }
 .switch:focus-visible { outline: 2px solid var(--green-light); outline-offset: 3px; }
 
-.audio-note { margin: 0; padding: 12px 16px; border-radius: 14px; background: rgba(0, 154, 0, 0.1); border: 1px solid var(--glass-border); color: var(--muted); font-size: 14px; }
 
 .folder-row {
   display: flex;

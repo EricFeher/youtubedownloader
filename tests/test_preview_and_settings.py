@@ -39,11 +39,11 @@ def test_summarize_playlist_falls_back_to_first_entry_thumbnail():
 
 def test_settings_roundtrip_ignores_unknown_keys(tmp_path):
     path = tmp_path / "settings.json"
-    settings.save({"output_dir": str(tmp_path), "mode": "audio", "quality": "1080", "compatible": True, "container": "mkv", "x": 1}, path)
+    settings.save({"output_dir": str(tmp_path), "mode": "audio", "quality": "1080", "compatible": True, "container": "mkv", "audio_format": "opus", "x": 1}, path)
 
     loaded = settings.load(path)
 
-    assert loaded == {"output_dir": str(tmp_path), "mode": "audio", "quality": "1080", "compatible": True, "container": "mkv"}
+    assert loaded == {"output_dir": str(tmp_path), "mode": "audio", "quality": "1080", "compatible": True, "container": "mkv", "audio_format": "opus"}
 
 
 def test_settings_fall_back_to_defaults_when_missing_or_broken(tmp_path):

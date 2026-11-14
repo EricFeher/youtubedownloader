@@ -11,7 +11,7 @@ const el = {
   thumb: $("thumb"), badge: $("badge"), duration: $("duration"),
   kind: $("preview-kind"), title: $("title"), uploader: $("uploader"),
   videoOptions: $("video-options"), audioOptions: $("audio-options"),
-  containerHint: $("container-hint"), compatibleRow: $("compatible-row"),
+  containerHint: $("container-hint"), audioFormatHint: $("audio-format-hint"), compatibleRow: $("compatible-row"),
   compatible: $("compatible"), playlistRow: $("playlist-row"), playlist: $("playlist"),
   folder: $("folder"), chooseFolder: $("choose-folder"), openFolder: $("open-folder"),
   download: $("download-btn"), progress: $("progress"), progressLabel: $("progress-label"),
@@ -159,14 +159,23 @@ const CONTAINERS = {
   webm: { label: "WebM", hint: "Nyílt formátum (VP9/AV1 + Opus), böngészőkhöz ideális. Borítókép nélkül." },
 };
 
+const AUDIO_FORMATS = {
+  mp3: { label: "MP3", hint: "Mindenhol lejátszható: autóban, régi lejátszón is. 320 kbps, borítóképpel, címmel és előadóval." },
+  m4a: { label: "M4A", hint: "Az eredeti AAC hangsáv átalakítás nélkül, borítóképpel. Apple-eszközökön és telefonon ideális." },
+  opus: { label: "Opus", hint: "A legjobb elérhető minőség átalakítás nélkül, kis fájlban. Régebbi lejátszók nem mindig kezelik." },
+  wav: { label: "WAV", hint: "Tömörítetlen, vágó- és DJ-programokhoz. Nem szól jobban, csak sokkal nagyobb; borítókép nélkül." },
+};
+
 function applyMode() {
   const audio = radioValue("mode") === "audio";
   const container = CONTAINERS[radioValue("container")] ?? CONTAINERS.mp4;
+  const audioFormat = AUDIO_FORMATS[radioValue("audio_format")] ?? AUDIO_FORMATS.mp3;
   el.videoOptions.hidden = audio;
   el.audioOptions.hidden = !audio;
   el.containerHint.textContent = container.hint;
+  el.audioFormatHint.textContent = audioFormat.hint;
   el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
-  el.download.querySelector("#download-label").textContent = `${audio ? "MP3" : container.label} letöltése`;
+  el.download.querySelector("#download-label").textContent = `${(audio ? audioFormat : container).label} letöltése`;
 }
 
 radios("mode").forEach((r) => r.addEventListener("change", () => {
@@ -176,6 +185,10 @@ radios("mode").forEach((r) => r.addEventListener("change", () => {
 radios("container").forEach((r) => r.addEventListener("change", () => {
   applyMode();
   saveSettings({ container: radioValue("container") });
+}));
+radios("audio_format").forEach((r) => r.addEventListener("change", () => {
+  applyMode();
+  saveSettings({ audio_format: radioValue("audio_format") });
 }));
 radios("quality").forEach((r) => r.addEventListener("change", () => saveSettings({ quality: radioValue("quality") })));
 el.compatible.addEventListener("change", () => saveSettings({ compatible: el.compatible.checked }));
@@ -220,6 +233,7 @@ async function startDownload() {
     mode: radioValue("mode"),
     quality: radioValue("quality"),
     container: radioValue("container"),
+    audio_format: radioValue("audio_format"),
     compatible: el.compatible.checked,
     playlist: state.isPlaylist || (!el.playlistRow.hidden && el.playlist.checked),
   });
@@ -302,6 +316,7 @@ window.addEventListener("pywebviewready", async () => {
   setRadio("mode", settings.mode);
   setRadio("quality", settings.quality);
   setRadio("container", CONTAINERS[settings.container] ? settings.container : "mp4");
+  setRadio("audio_format", AUDIO_FORMATS[settings.audio_format] ? settings.audio_format : "mp3");
   el.compatible.checked = settings.compatible;
   showFolder(settings.output_dir);
   applyMode();

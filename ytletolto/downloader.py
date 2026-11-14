@@ -18,12 +18,13 @@ from yt_dlp.utils import DownloadCancelled, DownloadError
 
 class Mode(Enum):
     VIDEO = "video"  # MP4 / MKV / WebM
-    AUDIO = "audio"  # MP3
+    AUDIO = "audio"  # MP3 / M4A / Opus / WAV
 
 
 MP3_BITRATE = "320K"
-# Videó fájlformátumok; az első az alapértelmezett.
+# Fájlformátumok; az első az alapértelmezett.
 VIDEO_CONTAINERS = ("mp4", "mkv", "webm")
+AUDIO_FORMATS = ("mp3", "m4a", "opus", "wav")
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class DownloadRequest:
     # H.264 + AAC: minden lejátszón megy, de a YouTube-on ez legfeljebb 1080p. WebM-nél nem értelmezett.
     compatible: bool = False
     container: str = VIDEO_CONTAINERS[0]
+    audio_format: str = AUDIO_FORMATS[0]
     playlist: bool = False
 
 
@@ -137,14 +139,7 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
         args += ["--ffmpeg-location", str(tools.ffmpeg_dir)]
 
     if request.mode is Mode.AUDIO:
-        args += [
-            "--embed-thumbnail",
-            "--format", "bestaudio/best",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", MP3_BITRATE,
-        ]
-        return args
+        return args + _audio_args(request.audio_format)
 
     container = request.container
     if container not in VIDEO_CONTAINERS:
@@ -180,6 +175,24 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
             "--merge-output-format", container,
             "--remux-video", container,
         ]
+    return args
+
+
+def _audio_args(audio_format: str) -> list[str]:
+    if audio_format not in AUDIO_FORMATS:
+        raise ValueError(f"Ismeretlen hangformátum: {audio_format}")
+
+    # Az M4A (AAC) és az Opus sávot a YouTube eleve így adja: ha megvan, újrakódolás nélkül átmásoljuk.
+    source = {
+        "m4a": "bestaudio[ext=m4a]/bestaudio/best",
+        "opus": "bestaudio[acodec=opus]/bestaudio/best",
+    }.get(audio_format, "bestaudio/best")
+    # MP3-nál fix bitráta; a többinél csak akkor számít, ha mégis át kell kódolni (0 = legjobb VBR).
+    quality = MP3_BITRATE if audio_format == "mp3" else "0"
+
+    args = ["--format", source, "--extract-audio", "--audio-format", audio_format, "--audio-quality", quality]
+    if audio_format != "wav":  # WAV-ba a yt-dlp nem tud borítóképet tenni
+        args.append("--embed-thumbnail")
     return args
 
 
@@ -287,7 +300,7 @@ class _Logger:
 # A kulcs a yt-dlp utófeldolgozó neve (PostProcessor.pp_key()).
 _POSTPROCESSOR_LABELS = {
     "Merger": "Videó és hang összefűzése…",
-    "ExtractAudio": "Átalakítás MP3-ba…",
+    "ExtractAudio": "Hangsáv feldolgozása…",
     "VideoRemuxer": "Átcsomagolás…",
     "EmbedThumbnail": "Borítókép beágyazása…",
     "Metadata": "Metaadatok beírása…",

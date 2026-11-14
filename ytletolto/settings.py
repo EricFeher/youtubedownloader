@@ -13,6 +13,7 @@ DEFAULTS: dict = {
     "quality": "best",
     "compatible": False,
     "container": "mp4",
+    "audio_format": "mp3",
 }
 
 

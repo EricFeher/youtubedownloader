@@ -1,6 +1,6 @@
 # YT Letöltő
 
-Asztali alkalmazás YouTube-videók letöltéséhez **videóként** (MP4, MKV vagy WebM) vagy **MP3 hangként**, a lehető legjobb minőségben.
+Asztali alkalmazás YouTube-videók letöltéséhez **videóként** (MP4, MKV vagy WebM) vagy **hangként** (MP3, M4A, Opus vagy WAV), a lehető legjobb minőségben.
 Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete egy modern weboldalt idéz.
 
 - **Videó (MP4)**: a legjobb elérhető képminőség (akár 4K/60 fps) a legjobb hangsávval összefűzve.
@@ -9,7 +9,11 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
   Opus hangsávval) vagy WebM (VP9/AV1 + Opus; ha egy videónál nincs ilyen sáv, MKV lesz belőle, borítókép nélkül).
 - **Kompatibilis mód**: H.264 + AAC, ami minden lejátszón és tévén megy, de a YouTube-on legfeljebb 1080p.
   Kapcsold be, ha egy régebbi lejátszó nem játssza le a legjobb minőségű (VP9/AV1) fájlt.
-- **Csak hang (MP3)**: a legjobb hangsávból 320 kbps MP3, borítóképpel és metaadatokkal (cím, előadó).
+- **Csak hang**: borítóképpel és metaadatokkal (cím, előadó).
+  - **MP3** (alapértelmezett): 320 kbps, mindenhol lejátszható.
+  - **M4A** és **Opus**: a YouTube eredeti AAC, illetve Opus sávja újrakódolás nélkül, tehát minőségvesztés nélkül.
+    Az Opus a legjobb elérhető hangminőség.
+  - **WAV**: tömörítetlen, vágó- és DJ-programokhoz, borítókép nélkül. Nem szól jobban a forrásnál, csak nagyobb.
 - Link beillesztése után előnézet: borítókép, cím, csatorna, hossz és a legjobb elérhető felbontás.
 - Lejátszási lista letöltése, folyamatjelző sebességgel és hátralévő idővel, megszakítás.
 - Megjegyzi a mentési mappát és az utoljára választott beállításokat.

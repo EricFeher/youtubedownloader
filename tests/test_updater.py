@@ -17,7 +17,7 @@ def release(package=b"MZnew executable", flavor="onefile", version="v1.2.0"):
     return {
         "tag_name": version, "body": "## Újdonságok\n- Frissítés az alkalmazásból.",
         "published_at": "2026-11-15T10:00:00Z", "draft": False, "prerelease": False,
-        "assets": [{"name": updater.ASSETS[flavor], "state": "uploaded", "size": len(package),
+        "assets": [{"name": {"onefile": "Media.Minds.Downloader.exe", "onedir": "MediaMindsDownloader-windows.zip"}[flavor], "state": "uploaded", "size": len(package),
                     "digest": "sha256:" + hashlib.sha256(package).hexdigest(),
                     "browser_download_url": f"https://github.com/{updater.REPOSITORY}/releases/download/{version}/app"}],
     }

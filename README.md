@@ -49,7 +49,7 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
 Töltsd le a [Releases](../../releases) oldalról (vagy a legutóbbi *Windows build* futás artifactjai közül):
 
 - `MediaMindsDownloader-windows.zip`: csomagold ki, és indítsd a `Media Minds Downloader\Media Minds Downloader.exe`-t. **Ez indul gyorsabban.**
-- `Media Minds Downloader.exe`: egyetlen fájl, de minden indításkor kicsomagolja magát, ezért pár másodperccel lassabban indul.
+- `Media.Minds.Downloader.exe`: egyetlen fájl, de minden indításkor kicsomagolja magát, ezért pár másodperccel lassabban indul.
 
 Az ffmpeg és a Deno benne van a csomagban, semmit nem kell külön telepíteni. A felülethez a Microsoft Edge
 WebView2 kell, ami Windows 11-en és a frissített Windows 10-eken már gyárilag fent van.

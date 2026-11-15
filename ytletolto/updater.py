@@ -20,7 +20,8 @@ from pathlib import Path
 from . import APP_NAME
 from ._build import FLAVOR, REPOSITORY, VERSION
 
-ASSETS = {"onefile": f"{APP_NAME}.exe", "onedir": "MediaMindsDownloader-windows.zip"}
+# GitHub normalizes spaces in uploaded asset names to dots.
+ASSETS = {"onefile": "Media.Minds.Downloader.exe", "onedir": "MediaMindsDownloader-windows.zip"}
 MAX_PACKAGE_SIZE = 2 * 1024**3
 
 

@@ -9,15 +9,17 @@ import signal
 import subprocess
 import threading
 from collections.abc import Callable
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from .downloader import DownloadRequest, Downloader, Event, Finished, Tools
 
 
-def _run(request: DownloadRequest, tools: Tools, events) -> None:
+def _run(request: DownloadRequest, tools: Tools, events, temp_dir: Path) -> None:
     if os.name != "nt":
         os.setsid()
     try:
-        Downloader(events.put, tools, _inline_sections=True).run(request)
+        Downloader(events.put, tools, _inline_sections=True, _temp_dir=temp_dir).run(request)
     except Exception as exc:
         events.put(Finished(False, f"Nem sikerült letölteni a részletet: {exc}"))
 
@@ -43,9 +45,19 @@ def _stop(process) -> None:
 
 
 def download_section(request: DownloadRequest, tools: Tools, emit: Callable[[Event], None], cancel: threading.Event) -> Finished:
+    if cancel.is_set():
+        return Finished(False, "Letöltés megszakítva.")
+    request.output_dir.mkdir(parents=True, exist_ok=True)
+    # A szülő takarít, miután a worker és az ffmpeg is leállt, kényszerített megszakításkor is.
+    with TemporaryDirectory(prefix=".mm-download-", dir=request.output_dir) as temp_dir:
+        return _download_section(request, tools, emit, cancel, Path(temp_dir).resolve())
+
+
+def _download_section(request: DownloadRequest, tools: Tools, emit: Callable[[Event], None],
+                      cancel: threading.Event, temp_dir: Path) -> Finished:
     context = multiprocessing.get_context("spawn")
     events = context.Queue()
-    process = context.Process(target=_run, args=(request, tools, events))
+    process = context.Process(target=_run, args=(request, tools, events, temp_dir))
     try:
         if cancel.is_set():
             return Finished(False, "Letöltés megszakítva.")

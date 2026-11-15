@@ -12,6 +12,8 @@ from playwright.sync_api import expect, sync_playwright
 WEB = Path(__file__).resolve().parents[1] / "ytletolto" / "web"
 API = r"""
 window.recorded = { enqueued: [], saved: [], probes: [] };
+window.updateData = {current_version:'1.1.0',status:'current',available:false,supported:true,version:'1.1.0',notes:'## Javítások\n- Stabilabb letöltések.',published_at:'2026-11-15T10:00:00Z',error:'',progress:null};
+window.updateCalls = [];
 const quality = (tier) => ({tier, fps: 30, size: 1000000});
 window.videoData = {
   one: {kind:'video', title:'Első videó', thumbnail:'video-one.jpg', uploader:'Media Minds', duration:120, max_height:1080,
@@ -23,7 +25,10 @@ window.videoData = {
 };
 window.pywebview = {api: {
   init:async()=>({settings:{output_dir:'/downloads',mode:'video',quality:'best',container:'mp4',audio_format:'mp3',compatible:false},
-    ffmpeg:true,js_runtime:true,queue:{version:0,items:[]}}),
+    ffmpeg:true,js_runtime:true,queue:{version:0,items:[]},update:window.updateData}),
+  check_update:async()=>{window.updateCalls.push('check');return window.updateData;},
+  download_update:async()=>{window.updateCalls.push('download');return {...window.updateData,status:'ready',progress:100};},
+  install_update:async()=>{window.updateCalls.push('install');return {ok:false,error:'Teszt: az újraindítás most nem érhető el.'};},
   save_settings:async(changes)=>window.recorded.saved.push(changes),
   probe:async(url,playlist)=>{
     window.recorded.probes.push(url);
@@ -78,6 +83,58 @@ def page(browser, web_server):
 
 def set_range(page, side, seconds):
     page.locator(f"#range-{side}").evaluate("(input,value)=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}", seconds)
+
+
+def test_updates_auto_check_notes_dialog_keyboard_and_safe_text(page):
+    assert page.evaluate("window.updateCalls") == ["check"]
+    expect(page.locator("#update-banner")).to_be_hidden()
+    page.locator("#updates-open").click()
+    expect(page.locator("#updates-dialog")).to_be_visible()
+    expect(page.locator("#update-status")).to_contain_text("legfrissebb")
+    expect(page.locator("#release-notes")).to_contain_text("Stabilabb")
+    page.evaluate("window.updateData={...window.updateData,available:true,status:'available',version:'1.2.0',notes:'<img src=x onerror=alert(1)> Újdonságok'}")
+    page.locator("#update-check").click()
+    expect(page.locator("#release-notes")).to_have_text("<img src=x onerror=alert(1)> Újdonságok")
+    assert page.locator("#release-notes img").count() == 0
+    page.locator("#updates-close").click()
+    expect(page.locator("#update-banner")).to_be_visible()
+    page.locator("#update-banner-open").click()
+    page.keyboard.press("Escape")
+    expect(page.locator("#updates-dialog")).not_to_be_visible()
+    expect(page.locator("#update-banner-open")).to_be_focused()
+
+
+def test_update_download_progress_restart_gating_and_failure(page):
+    page.evaluate("window.updateData={...window.updateData,available:true,status:'available',version:'1.2.0'};window.app.onUpdate(window.updateData)")
+    page.locator("#update-banner-open").click()
+    page.locator("#update-download").click()
+    expect(page.locator("#update-install")).to_be_enabled()
+    page.evaluate("window.app.onEvent({type:'queue',version:5,items:[{id:1,state:'queued',title:'Teszt',mode:'video',container:'mp4',files:[]}]})")
+    expect(page.locator("#update-install")).to_be_disabled()
+    expect(page.locator("#update-status")).to_contain_text("letöltési sor végét")
+    page.evaluate("window.app.onEvent({type:'queue',version:6,items:[]})")
+    page.locator("#update-install").click()
+    expect(page.locator("#update-error")).to_contain_text("újraindítás")
+    expect(page.locator("#update-install")).to_be_enabled()
+    assert page.evaluate("window.updateCalls") == ["check", "download", "install"]
+    page.evaluate("window.app.onUpdate({...window.updateData,status:'downloading',progress:42})")
+    expect(page.locator("#update-progress")).to_have_attribute("value", "42")
+    expect(page.locator("#update-download")).to_be_disabled()
+    expect(page.locator("#update-check")).to_be_disabled()
+
+
+def test_update_network_retry_unsupported_build_and_small_window(page):
+    page.set_viewport_size({"width": 600, "height": 700})
+    page.locator("#updates-open").click()
+    page.evaluate("window.app.onUpdate({...window.updateData,status:'error',error:'Nincs internetkapcsolat.'})")
+    expect(page.locator("#update-error")).to_have_text("Nincs internetkapcsolat.")
+    page.locator("#update-check").click()
+    expect(page.locator("#update-error")).to_be_hidden()
+    page.evaluate("window.app.onUpdate({...window.updateData,available:true,supported:false,status:'available',version:'1.2.0',notes:'Hosszú sor '.repeat(200)})")
+    expect(page.locator("#update-download")).to_be_hidden()
+    expect(page.locator("#update-status")).to_contain_text("Windows")
+    assert page.locator("#updates-dialog").evaluate("el=>el.scrollWidth<=el.clientWidth")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
 
 
 def test_playlist_editor_keeps_individual_settings_and_sends_them(page):

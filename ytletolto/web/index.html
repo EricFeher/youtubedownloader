@@ -16,6 +16,11 @@
       <h1>Media Minds <span class="gradient-text">Downloader</span></h1>
     </header>
 
+    <section class="update-banner" id="update-banner" aria-label="Elérhető frissítés" hidden>
+      <div><p class="eyebrow">Új verzió érhető el</p><strong id="update-banner-title"></strong></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="update-banner-open">Újdonságok és frissítés</button>
+    </section>
+
     <section class="hero">
       <form class="url-bar" id="url-form" autocomplete="off">
         <svg class="url-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></svg>
@@ -200,10 +205,36 @@
     <p class="warning-banner" id="tools-warning" hidden></p>
 
     <footer class="footer">
+      <button type="button" class="btn btn-ghost btn-sm" id="updates-open" disabled>Frissítések és újdonságok</button>
+      <small class="muted" id="app-version"></small>
       <span>Készítette</span>
       <img src="mm-wordmark.png" alt="MediaMinds – your creative marketing agency">
     </footer>
   </main>
+
+  <dialog class="updates-dialog" id="updates-dialog" aria-labelledby="updates-title">
+    <div class="updates-head">
+      <div><p class="eyebrow">Mindig naprakészen</p><h2 id="updates-title">Frissítések és újdonságok</h2></div>
+      <button type="button" class="btn btn-ghost btn-icon" id="updates-close" aria-label="Bezárás">✕</button>
+    </div>
+    <div class="update-summary">
+      <span class="version-pill" id="update-current"></span>
+      <span class="version-pill version-new" id="update-latest" hidden></span>
+    </div>
+    <p id="update-status" role="status" aria-live="polite"></p>
+    <progress id="update-progress" max="100" aria-label="Frissítés letöltése" hidden></progress>
+    <p class="inline-error" id="update-error" role="alert" hidden></p>
+    <section class="release-notes" aria-labelledby="notes-title">
+      <h3 class="card-title" id="notes-title">Kiadási megjegyzések · Patch notes</h3>
+      <p class="muted" id="release-date"></p>
+      <div id="release-notes">A kiadási megjegyzések az ellenőrzés után jelennek meg.</div>
+    </section>
+    <div class="updates-actions">
+      <button type="button" class="btn btn-ghost btn-sm" id="update-check">Frissítések keresése</button>
+      <button type="button" class="btn btn-primary" id="update-download" hidden>Frissítés letöltése</button>
+      <button type="button" class="btn btn-primary" id="update-install" hidden>Újraindítás és frissítés</button>
+    </div>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

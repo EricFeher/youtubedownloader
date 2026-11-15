@@ -36,6 +36,12 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
   Élő adásnál és ismeretlen hosszúságú videónál nincs csúszka.
 - Folyamatjelző sebességgel és hátralévő idővel, megszakítás.
 - Megjegyzi a mentési mappát és az utoljára választott beállításokat.
+- **Alkalmazásfrissítés**: induláskor és óránként ellenőrzi a GitHub legújabb stabil kiadását.
+  Új verziónál zöld értesítés jelenik meg. A lábléc **Frissítések és újdonságok** gombjával bármikor
+  ellenőrizhetsz, és az alkalmazásban elolvashatod a kiadási megjegyzéseket (patch notes).
+  A csomagolt Windows-változatokban a **Frissítés letöltése**, majd az **Újraindítás és frissítés**
+  gombbal telepíthetsz; a beállítások és a letöltött videók megmaradnak. Az újraindítás a letöltési sor
+  befejezése után érhető el. A hálózati hibák újrapróbálhatók, a videóletöltést nem akadályozzák.
 - A MediaMinds arculatában készült: sötét felület, zöld színátmenet, Outfit betűtípus és MediaMinds logó.
 
 ## Használat Windows-on
@@ -49,6 +55,11 @@ Az ffmpeg és a Deno benne van a csomagban, semmit nem kell külön telepíteni.
 WebView2 kell, ami Windows 11-en és a frissített Windows 10-eken már gyárilag fent van.
 Mivel a program nincs digitálisan aláírva, a Windows SmartScreen első indításkor figyelmeztethet:
 *További információ → Futtatás mindenképp*.
+
+Az alkalmazáson belüli frissítéshez a program mappájának írhatónak kell lennie (például a saját
+Letöltések mappádban). A ZIP-es változat ZIP-es, az egyfájlos változat EXE-s kiadással frissül.
+A régi, frissítő nélküli kiadást egyszer még kézzel kell lecserélni az első, frissítőt tartalmazó verzióra.
+Fejlesztői futtatásnál és macOS-en a verzióellenőrzés és a kiadási megjegyzések érhetők el.
 
 ## Fejlesztés
 
@@ -83,12 +94,24 @@ Windows-on a `build.py` automatikusan letölti az ffmpeg-et és a Deno-t a `vend
 A PyInstaller nem tud keresztfordítani, ezért Windows-os `.exe` csak Windows-on készülhet. Erre való a
 `.github/workflows/build-windows.yml`: csak `v*` tag pusholásakor indul. Lefuttatja a teszteket,
 felépíti és ellenőrzi a Windows-csomagokat, majd a taghez GitHub Release-t készít a ZIP-pel és az EXE-vel.
+Az alkalmazás verzióját és frissítési forrását a build a tagből (`vX.Y.Z`) és a GitHub repositoryból
+írja a csomagba; helyi buildnél a `python build.py --version 1.1.0` kapcsolóval adható meg.
+Forrásból futtatva az alapverziót a `ytletolto/_build.py` tárolja.
 
-Új verzió kiadásához a kiadandó `main` commiton (például az első kiadásnál):
+A workflow automatikus kiadási megjegyzéseket készít. A GitHub Release leírását szerkesztve saját,
+például magyar patch notes adható meg; az alkalmazás ezt jeleníti meg szövegként. A frissítő csak
+közzétett, stabil kiadást telepít, a megfelelő asset GitHub által megadott SHA-256 lenyomatával.
+Hiányzó vagy eltérő lenyomat esetén nem cseréli le a programot. A segédfolyamat kilépés után cseréli
+az EXE-t és ZIP-es kiadásnál az `_internal` mappát, hiba esetén visszaállítja a mentett fájlokat.
+Más, a program mellé mentett fájlokhoz nem nyúl. A sikertelen telepítés részleteit a program mappáján
+belüli `.mm-update-*/update-error.txt` őrzi. Ez hordozható csomagfrissítés: az új csomagot tölti le,
+nem különbségi javítócsomagot. Nincs külön frissítőszerver vagy hozzáférési token.
+
+Új verzió kiadásához a kiadandó `main` commiton (például a frissítőt bevezető kiadásnál):
 
 ```sh
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ## Hogyan működik

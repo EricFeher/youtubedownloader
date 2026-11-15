@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from .download_queue import (
     is_playlist_url,
 )
 from .downloader import Downloader, Progress, find_tools, probe
+from .updater import Updater
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PROGRESS_INTERVAL = 0.1  # mp – ennél sűrűbben nem frissítjük a folyamatjelzőt
@@ -46,6 +48,8 @@ class Api:
         self._settings = settings_store.load()
         self._queue = DownloadQueue(self._emit, lambda emit: Downloader(emit, self._tools))
         self._last_progress = 0.0
+        self._update_guard = threading.RLock()
+        self._updates = Updater(self._emit_update)
 
     def attach(self, window: webview.Window) -> None:
         self._window = window
@@ -58,7 +62,27 @@ class Api:
             "ffmpeg": bool(self._tools.ffmpeg_dir),
             "js_runtime": bool(self._tools.js_runtimes),
             "queue": event_payload(self._queue.snapshot()),
+            "update": self._updates.snapshot(),
         }
+
+    def check_update(self) -> dict:
+        return self._updates.check()
+
+    def download_update(self) -> dict:
+        return self._updates.download()
+
+    def install_update(self) -> dict:
+        with self._update_guard:
+            if any(item.state.value in {"queued", "running"} for item in self._queue.snapshot().items):
+                return {"ok": False, "error": "A frissítéshez előbb várd meg a letöltési sor végét."}
+            if not self._window:
+                return {"ok": False, "error": "Az alkalmazás ablaka nem érhető el."}
+            try:
+                self._updates.launch_installer()
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+            self._window.destroy()
+            return {"ok": True}
 
     def probe(self, url: str, playlist: bool = False) -> dict:
         try:
@@ -97,6 +121,12 @@ class Api:
         settings_store.save(self._settings)
 
     def enqueue(self, options: dict) -> dict:
+        with self._update_guard:
+            if self._updates.snapshot()["status"] == "installing":
+                return {"ok": False, "error": "A frissítés telepítése folyamatban van."}
+            return self._enqueue(options)
+
+    def _enqueue(self, options: dict) -> dict:
         """Sorba állítja a linkeket (`items`: url, és ha az előnézetből ismert: title, thumbnail, playlist).
 
         Ha a `playlist` hiányzik (pl. több beillesztett linknél), a link alakjából döntjük el.
@@ -149,12 +179,22 @@ class Api:
         return self._queue.remove(int(item_id))
 
     def retry(self, item_id: int) -> bool:
-        return self._queue.retry(int(item_id))
+        with self._update_guard:
+            if self._updates.snapshot()["status"] == "installing":
+                return False
+            return self._queue.retry(int(item_id))
 
     def clear_finished(self) -> int:
         return self._queue.clear_finished()
 
     # --- Belső -------------------------------------------------------------
+
+    def _emit_update(self, state: dict) -> None:
+        if self._window:
+            try:
+                self._window.evaluate_js(f"window.app && window.app.onUpdate({json.dumps(state)})")
+            except Exception:
+                pass  # The user may close the window during a network request.
 
     def _emit(self, event: QueueEvent) -> None:
         if isinstance(event, ItemEvent) and isinstance(event.event, Progress) and event.event.percent != 100.0:
@@ -168,6 +208,7 @@ class Api:
 
     def on_closing(self) -> None:
         self._queue.shutdown()
+        self._updates.close()
 
 
 # --- Rendszerfunkciók --------------------------------------------------------

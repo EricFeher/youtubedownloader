@@ -8,9 +8,16 @@ import sys
 
 
 def check() -> int:
+    from pathlib import Path
+
+    from ytletolto import updater
     from ytletolto.downloader import find_tools
 
     tools = find_tools()
+    updater.version_tuple(updater.VERSION)
+    update_ok = (Path(updater.__file__).parent / "install_update.ps1").is_file()
+    if getattr(sys, "frozen", False):
+        update_ok = update_ok and updater.FLAVOR in updater.ASSETS
     try:
         # A felület motorja is betölthető-e (Windows-on: pythonnet + WebView2 DLL-ek).
         from ytletolto.app import WEB_DIR
@@ -20,8 +27,10 @@ def check() -> int:
         ui = "OK" if (WEB_DIR / "index.html").is_file() else "HIBA: hiányzik a web mappa"
     except Exception as e:  # noqa: BLE001
         ui = f"HIBA: {e}"
-    ok = bool(tools.ffmpeg_dir and tools.js_runtimes) and ui == "OK"
-    report = f"ffmpeg: {tools.ffmpeg_dir}\njs: {tools.js_runtimes}\nui: {ui}\n{'OK' if ok else 'HIÁNYZIK'}\n"
+    ok = bool(tools.ffmpeg_dir and tools.js_runtimes) and ui == "OK" and update_ok
+    report = (f"ffmpeg: {tools.ffmpeg_dir}\njs: {tools.js_runtimes}\nui: {ui}\n"
+              f"version: {updater.VERSION}\npackage: {updater.FLAVOR}\nupdater: {'OK' if update_ok else 'HIÁNYZIK'}\n"
+              f"{'OK' if ok else 'HIÁNYZIK'}\n")
     # Ablakos (--windowed) Windows-buildben nincs stdout, ezért fájlba is írjuk.
     if len(sys.argv) > 2:
         with open(sys.argv[2], "w", encoding="utf-8") as f:

@@ -170,3 +170,38 @@ def test_playlist_without_video_thumbnail_does_not_use_playlist_cover(api):
     result = api.enqueue({"items": [{"url": "https://youtube.com/playlist?list=PL", "thumbnail": "playlist.jpg"}]})
     assert result["ok"] and api._queue.wait_idle(5)
     assert api._queue.snapshot().items[0].thumbnail is None
+
+
+def test_update_api_exposes_state_and_delegates(api, monkeypatch):
+    assert api.init()["update"]["current_version"]
+    monkeypatch.setattr(api._updates, "check", lambda: {"status": "available"})
+    monkeypatch.setattr(api._updates, "download", lambda: {"status": "ready"})
+    assert api.check_update() == {"status": "available"}
+    assert api.download_update() == {"status": "ready"}
+
+
+def test_install_blocks_pending_downloads_and_unready_updates(api, monkeypatch):
+    api._queue.shutdown()
+    api._queue = app.DownloadQueue(lambda event: None, lambda emit: BlockingDownloader())
+    api.enqueue({"items": [{"url": "https://youtu.be/a"}]})
+    assert "sor végét" in api.install_update()["error"]
+    api._queue.shutdown()
+
+
+def test_install_closes_window_only_after_helper_starts(api, monkeypatch):
+    calls = []
+    class Window:
+        def destroy(self):
+            calls.append("close")
+    api.attach(Window())
+    assert not api.install_update()["ok"]  # no staged update
+    assert calls == []
+    monkeypatch.setattr(api._updates, "launch_installer", lambda: calls.append("launch"))
+    assert api.install_update()["ok"]
+    assert calls == ["launch", "close"]
+
+
+def test_cannot_enqueue_or_retry_during_install(api):
+    api._updates._state["status"] = "installing"
+    assert not api.enqueue({"items": [{"url": "https://youtu.be/a"}]})["ok"]
+    assert not api.retry(1)

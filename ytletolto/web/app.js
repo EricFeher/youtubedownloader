@@ -1041,14 +1041,86 @@ const handlers = {
   log(e) { log(e.text, e.level); },
 };
 
-window.app = { onEvent: (e) => handlers[e.type]?.(e) };
+// --- Alkalmazásfrissítés ------------------------------------------------------
+
+let updateState = null;
+let updateRequest = false;
+const updateDialog = $("updates-dialog");
+
+function renderUpdate(update) {
+  updateState = update;
+  const busy = ["checking", "downloading", "installing"].includes(update.status);
+  const pending = [...state.items.values()].some((item) => ["queued", "running"].includes(item.state));
+  $("app-version").textContent = `v${update.current_version}`;
+  $("update-current").textContent = `Telepítve: v${update.current_version}`;
+  $("update-latest").textContent = `${update.available ? "Elérhető" : "Legutóbbi kiadás"}: v${update.version}`;
+  $("update-latest").hidden = !update.version;
+  $("update-banner").hidden = !update.available;
+  $("update-banner-title").textContent = `Media Minds Downloader · v${update.version}`;
+  $("update-check").disabled = busy || update.status === "ready";
+  $("update-download").hidden = !update.available || !update.supported || ["ready", "installing"].includes(update.status);
+  $("update-download").disabled = busy;
+  $("update-install").hidden = !["ready", "installing"].includes(update.status);
+  $("update-install").disabled = pending || update.status === "installing";
+  $("update-progress").hidden = update.status !== "downloading";
+  $("update-progress").value = update.progress ?? 0;
+  $("update-error").hidden = !update.error;
+  $("update-error").textContent = update.error || "";
+  const messages = {
+    idle: "Induláskor automatikusan ellenőrizzük az új kiadásokat.",
+    checking: "Frissítések keresése…",
+    current: "A legfrissebb verziót használod.",
+    available: "Az új verzió készen áll a letöltésre. A beállításaid megmaradnak.",
+    downloading: `Frissítés letöltése és ellenőrzése… ${update.progress ?? 0}%`,
+    ready: pending ? "A frissítés letöltve. Az újraindításhoz várd meg a letöltési sor végét." : "A frissítés letöltve és ellenőrizve. Az alkalmazás újraindul a telepítéshez.",
+    installing: "Frissítés telepítése, újraindítás…",
+    error: "Az ellenőrzés vagy a letöltés újrapróbálható.",
+  };
+  $("update-status").textContent = messages[update.status] || "";
+  if (!update.supported) $("update-status").textContent += " Az alkalmazáson belüli telepítés a csomagolt Windows-verziókban érhető el.";
+  // Release text is untrusted; render as text, never HTML.
+  $("release-notes").textContent = update.notes || "A kiadási megjegyzések az ellenőrzés után jelennek meg.";
+  const date = new Date(update.published_at);
+  $("release-date").textContent = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("hu-HU", {year: "numeric", month: "long", day: "numeric"});
+}
+
+async function requestUpdate(method) {
+  if (updateRequest) return;
+  updateRequest = true;
+  try { renderUpdate(await api()[method]()); }
+  catch { $("update-error").textContent = "A frissítési művelet nem sikerült. Próbáld újra."; $("update-error").hidden = false; }
+  finally { updateRequest = false; }
+}
+
+function openUpdates() {
+  if (!updateDialog.open) updateDialog.showModal();
+  if (updateState?.status === "idle") requestUpdate("check_update");
+}
+$("updates-open").addEventListener("click", openUpdates);
+$("update-banner-open").addEventListener("click", openUpdates);
+$("updates-close").addEventListener("click", () => updateDialog.close());
+$("update-check").addEventListener("click", () => requestUpdate("check_update"));
+$("update-download").addEventListener("click", () => requestUpdate("download_update"));
+$("update-install").addEventListener("click", async () => {
+  $("update-install").disabled = true;
+  try {
+    const result = await api().install_update();
+    if (!result.ok) { $("update-error").textContent = result.error; $("update-error").hidden = false; }
+  } catch { $("update-error").textContent = "Az újraindítás nem sikerült. Próbáld újra."; $("update-error").hidden = false; }
+  finally { if (updateState) $("update-install").disabled = updateState.status === "installing" || [...state.items.values()].some((item) => ["queued", "running"].includes(item.state)); }
+});
+
+window.app = {
+  onEvent: (e) => { handlers[e.type]?.(e); if (e.type === "queue" && updateState) renderUpdate(updateState); },
+  onUpdate: renderUpdate,
+};
 
 // --- Indulás -----------------------------------------------------------------
 
 renderQualities(); // amíg a mentett beállítások meg nem érkeznek
 
 window.addEventListener("pywebviewready", async () => {
-  const { settings, ffmpeg, js_runtime, queue } = await api().init();
+  const { settings, ffmpeg, js_runtime, queue, update } = await api().init();
   for (const key of Object.keys(state.defaults)) state.defaults[key] = settings[key] ?? state.defaults[key];
   setRadio("mode", settings.mode);
   state.quality = settings.quality;
@@ -1067,4 +1139,12 @@ window.addEventListener("pywebviewready", async () => {
     el.toolsWarning.hidden = false;
   }
   el.url.focus();
+  if (update) {
+    renderUpdate(update);
+    $("updates-open").disabled = false;
+    requestUpdate("check_update");
+    setInterval(() => {
+      if (!["ready", "installing", "downloading"].includes(updateState?.status)) requestUpdate("check_update");
+    }, 60 * 60 * 1000);
+  }
 });

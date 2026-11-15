@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import re
 import shutil
 import sys
 import urllib.request
@@ -22,6 +23,8 @@ from pathlib import Path
 import PyInstaller.__main__
 
 from ytletolto import APP_NAME
+from ytletolto._build import REPOSITORY, VERSION
+from ytletolto.updater import version_tuple
 
 ROOT = Path(__file__).resolve().parent
 VENDOR = ROOT / "vendor"
@@ -66,7 +69,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--onefile", action="store_true", help="egyetlen .exe a mappa helyett")
     parser.add_argument("--no-fetch", action="store_true", help="ne töltse le az ffmpeg-et és a Deno-t")
+    parser.add_argument("--version", default=os.environ.get("GITHUB_REF_NAME", VERSION), help="kiadási verzió (X.Y.Z vagy vX.Y.Z)")
     args = parser.parse_args()
+    version_tuple(args.version)
+    repository = os.environ.get("GITHUB_REPOSITORY", REPOSITORY)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        parser.error("Érvénytelen GitHub repository.")
 
     if sys.platform == "win32" and not args.no_fetch:
         fetch_windows_tools()
@@ -81,6 +89,7 @@ def main() -> None:
         "--clean",
         "--onefile" if args.onefile else "--onedir",
         "--add-data", f"{ROOT / 'ytletolto' / 'web'}{os.pathsep}ytletolto/web",
+        "--add-data", f"{ROOT / 'ytletolto' / 'install_update.ps1'}{os.pathsep}ytletolto",
         "--distpath", str(ROOT / "dist"),
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),
@@ -93,7 +102,17 @@ def main() -> None:
     for binary in vendor_binaries():
         pyinstaller_args += ["--add-binary", binary]
 
-    PyInstaller.__main__.run(pyinstaller_args)
+    metadata = ROOT / "ytletolto" / "_build.py"
+    original = metadata.read_bytes()
+    try:
+        metadata.write_text(
+            f"VERSION = {args.version.removeprefix('v')!r}\n"
+            f"FLAVOR = {'onefile' if args.onefile else 'onedir'!r}\n"
+            f"REPOSITORY = {repository!r}\n", encoding="utf-8",
+        )
+        PyInstaller.__main__.run(pyinstaller_args)
+    finally:
+        metadata.write_bytes(original)
 
 
 if __name__ == "__main__":

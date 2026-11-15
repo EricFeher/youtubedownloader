@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import os
+import gc
 import math
 import re
 import shutil
 import sys
 import threading
 from collections.abc import Callable, Iterable
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled, DownloadError
@@ -548,12 +551,14 @@ _POSTPROCESSOR_LABELS = {
 class Downloader:
     """Egy letöltés futtatása. A `run` blokkol, ezért háttérszálon kell hívni."""
 
-    def __init__(self, emit: Callable[[Event], None], tools: Tools | None = None, *, _inline_sections: bool = False):
+    def __init__(self, emit: Callable[[Event], None], tools: Tools | None = None, *, _inline_sections: bool = False,
+                 _temp_dir: Path | None = None):
         self._emit = emit
         self._tools = tools or find_tools()
         self._cancel = threading.Event()
         self._mode = Mode.VIDEO
         self._inline_sections = _inline_sections
+        self._temp_dir = _temp_dir
         # Elemenként választott listánál az elemek folyamatos számozásához, a menetek (videó, hang) között is.
         self._item_offset = 0
         self._item_total: int | None = None
@@ -588,7 +593,11 @@ class Downloader:
                 from .section_worker import download_section
 
                 self._emit(Status("Kijelölt részlet letöltése és feldolgozása…"))
-                result = download_section(request, self._tools, self._emit, self._cancel)
+                try:
+                    result = download_section(request, self._tools, self._emit, self._cancel)
+                except Exception as e:  # noqa: BLE001 - az előkészítés és a takarítás is hibázhat
+                    self._emit(Finished(False, f"Váratlan hiba: {e}", tuple(files)))
+                    return
                 files.extend(path for path in result.files if path not in files)
                 if not result.ok:
                     self._emit(Finished(False, result.message, tuple(files)))
@@ -614,8 +623,29 @@ class Downloader:
                 if request.is_section and request.mode is Mode.VIDEO:
                     opts["_section_container"] = request.container
                     ydl_class = _SectionYoutubeDL
-                with ydl_class(opts) as ydl:
-                    failed |= bool(ydl.download([request.url]))
+                # Csak ennek a menetnek a köztes fájljait töröljük; a kész médiafájlokat
+                # a yt-dlp MoveFiles lépése a végleges helyükre mozgatja.
+                workspace = (nullcontext(str(self._temp_dir)) if self._temp_dir is not None else
+                             TemporaryDirectory(prefix=".mm-download-", dir=request.output_dir))
+                with workspace as temp_dir:
+                    opts["paths"]["temp"] = str(Path(temp_dir).resolve())
+                    download_result = None
+                    try:
+                        with ydl_class(opts) as ydl:
+                            failed |= bool(ydl.download([request.url]))
+                    except DownloadCancelled:
+                        download_result = Finished(False, "Letöltés megszakítva.", tuple(files))
+                    except DownloadError as e:
+                        download_result = Finished(False, _clean_error(str(e)), tuple(files))
+                    except Exception as e:
+                        download_result = Finished(False, f"Váratlan hiba: {e}", tuple(files))
+                    # A yt-dlp darabolt letöltője körkörös hook-hivatkozásokban tarthatja
+                    # a nyitott célfájlt. Az except blokkon kívül már a kivétel tracebackje
+                    # sem él: a takarítás előtt elengedhetők a Windows-os fájlzárak.
+                    gc.collect()
+                if download_result is not None:
+                    self._emit(download_result)
+                    return
             except DownloadCancelled:
                 self._emit(Finished(False, "Letöltés megszakítva.", tuple(files)))
                 return
@@ -681,7 +711,11 @@ class Downloader:
                 if label:
                     self._emit(Status(label))
             elif d["status"] == "finished" and d.get("postprocessor") == "MoveFiles":
-                path = (d.get("info_dict") or {}).get("filepath")
+                info = d.get("info_dict") or {}
+                path = info.get("filepath")
+                # A hook a mozgatás előtti info-másolatot kapja, benne még a munkafájl útvonalával.
+                if path and info.get("__finaldir"):
+                    path = str(Path(info["__finaldir"]) / Path(path).name)
                 if path and path not in files:
                     files.append(path)
 

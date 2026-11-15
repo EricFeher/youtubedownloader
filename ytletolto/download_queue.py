@@ -228,7 +228,8 @@ class DownloadQueue:
                 return
             try:
                 runner = self._factory(lambda event, item=item: self._on_event(item, event))
-                thread = threading.Thread(target=self._run, args=(item, runner), daemon=True, name=f"download-{item.id}")
+                # Kilépéskor a megszakított letöltésnek még el kell takarítania a köztes fájljait.
+                thread = threading.Thread(target=self._run, args=(item, runner), daemon=False, name=f"download-{item.id}")
                 item.state = ItemState.RUNNING
                 self._active = (item, runner)
                 self._cancel_requested = False

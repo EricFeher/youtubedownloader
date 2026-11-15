@@ -105,6 +105,8 @@ def test_real_section_download_produces_selected_duration(local_media, tmp_path,
     assert len(result.files) == 1
     path = Path(result.files[0])
     assert path.is_file() and "000001.000-000002.500" in path.name
+    assert path.parent == request.output_dir
+    assert list(request.output_dir.iterdir()) == [path]
     assert path.suffix == "." + (container if mode is Mode.VIDEO else audio_format)
     info = json.loads(subprocess.check_output([ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)]))
     assert float(info["format"]["duration"]) == pytest.approx(1.5, abs=0.2)
@@ -112,7 +114,25 @@ def test_real_section_download_produces_selected_duration(local_media, tmp_path,
     assert any(s["codec_type"] == "audio" for s in info["streams"])
 
 
-def _worker_with_child(request, tools, events):
+@pytest.mark.parametrize("mode", [Mode.VIDEO, Mode.AUDIO])
+@pytest.mark.parametrize("relative", [False, True])
+def test_real_full_download_preserves_final_file_and_removes_workspace(local_media, tmp_path, monkeypatch, mode, relative):
+    url, ffmpeg_dir, ffprobe = local_media
+    monkeypatch.chdir(tmp_path)
+    request = DownloadRequest(url, Path("out") if relative else tmp_path / "out", mode)
+    events = []
+    Downloader(events.append, Tools(ffmpeg_dir)).run(request)
+    result = events[-1]
+    assert isinstance(result, Finished) and result.ok, events
+    assert len(result.files) == 1
+    path = Path(result.files[0])
+    assert path.parent == request.output_dir.resolve()
+    assert list(request.output_dir.resolve().iterdir()) == [path]
+    info = json.loads(subprocess.check_output([ffprobe, "-v", "error", "-show_format", "-of", "json", str(path)]))
+    assert float(info["format"]["duration"]) == pytest.approx(4, abs=0.2)
+
+
+def _worker_with_child(request, tools, events, temp_dir):
     if os.name != "nt":
         os.setsid()
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])

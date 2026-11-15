@@ -5,6 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
@@ -12,6 +13,27 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check signing configuration
+        id: signing-config
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+        run: |
+          $required = @(
+            'SIGNPATH_API_TOKEN', 'SIGNPATH_ORGANIZATION_ID', 'SIGNPATH_PROJECT_SLUG',
+            'SIGNPATH_SIGNING_POLICY_SLUG', 'SIGNPATH_ARTIFACT_CONFIGURATION_SLUG'
+          )
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing $name. Configure SignPath as described in docs/windows-signing.md."
+            }
+          }
+          "version=$($env:GITHUB_REF_NAME -replace '^v', '')" >> $env:GITHUB_OUTPUT
 
       - uses: actions/setup-python@v5
         with:
@@ -33,18 +55,53 @@ jobs:
       - name: Build (single exe)
         run: python build.py --onefile --no-fetch
 
+      - name: Upload executables for signing
+        id: unsigned-executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows-executables
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            dist/Media Minds Downloader/Media Minds Downloader.exe
+            dist/Media Minds Downloader.exe
+
+      - name: Sign Windows executables
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-executables.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 7200
+          output-artifact-directory: signed-executables
+          parameters: |
+            version: ${{ toJSON(steps.signing-config.outputs.version) }}
+
+      - name: Verify and install signed executables
+        shell: pwsh
+        run: |
+          ./scripts/verify-windows-signatures.ps1 -Root signed-executables
+          Copy-Item -LiteralPath 'signed-executables/Media Minds Downloader.exe' -Destination 'dist/Media Minds Downloader.exe' -Force
+          Copy-Item -LiteralPath 'signed-executables/Media Minds Downloader/Media Minds Downloader.exe' -Destination 'dist/Media Minds Downloader/Media Minds Downloader.exe' -Force
+
       - name: Check bundled ffmpeg and Deno
         shell: pwsh
         run: |
           foreach ($exe in "dist\Media Minds Downloader\Media Minds Downloader.exe", "dist\Media Minds Downloader.exe") {
-            $p = Start-Process $exe -ArgumentList "--check", "$PWD\check.txt" -Wait -PassThru
+            $p = Start-Process $exe -ArgumentList "--check", "$PWD\check.txt" -WindowStyle Hidden -Wait -PassThru
             Get-Content check.txt
             if ($p.ExitCode -ne 0) { throw "$exe --check failed" }
           }
 
       - name: Package
         shell: pwsh
-        run: Compress-Archive -Path "dist\Media Minds Downloader" -DestinationPath MediaMindsDownloader-windows.zip
+        run: |
+          ./scripts/verify-windows-signatures.ps1 -Root dist
+          Compress-Archive -Path "dist\Media Minds Downloader" -DestinationPath MediaMindsDownloader-windows.zip
 
       - uses: actions/upload-artifact@v4
         with:

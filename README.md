@@ -53,8 +53,9 @@ Töltsd le a [Releases](../../releases) oldalról (vagy a legutóbbi *Windows bu
 
 Az ffmpeg és a Deno benne van a csomagban, semmit nem kell külön telepíteni. A felülethez a Microsoft Edge
 WebView2 kell, ami Windows 11-en és a frissített Windows 10-eken már gyárilag fent van.
-Mivel a program nincs digitálisan aláírva, a Windows SmartScreen első indításkor figyelmeztethet:
-*További információ → Futtatás mindenképp*.
+A korábbi, aláíratlan kiadásoknál a Windows SmartScreen figyelmeztethet. Az aláírással készülő
+kiadásoknál is megjelenhet figyelmeztetés, amíg a program és a kiadó megfelelő reputációt nem szerez.
+A digitális aláírás az EXE **Tulajdonságok → Digitális aláírások** lapján ellenőrizhető.
 
 Az alkalmazáson belüli frissítéshez a program mappájának írhatónak kell lennie (például a saját
 Letöltések mappádban). A ZIP-es változat ZIP-es, az egyfájlos változat EXE-s kiadással frissül.
@@ -94,6 +95,9 @@ Windows-on a `build.py` automatikusan letölti az ffmpeg-et és a Deno-t a `vend
 A PyInstaller nem tud keresztfordítani, ezért Windows-os `.exe` csak Windows-on készülhet. Erre való a
 `.github/workflows/build-windows.yml`: csak `v*` tag pusholásakor indul. Lefuttatja a teszteket,
 felépíti és ellenőrzi a Windows-csomagokat, majd a taghez GitHub Release-t készít a ZIP-pel és az EXE-vel.
+A kiadás előtt mindkét saját EXE-t a SignPath szolgáltatással aláírja, majd ellenőrzi az aláírást
+és az időbélyeget. Hiányzó konfiguráció vagy sikertelen aláírás esetén nem tesz közzé release-t.
+Az éles aláíráshoz előbb el kell végezni a [Windows-aláírás beállítását](docs/windows-signing.md).
 Az alkalmazás verzióját és frissítési forrását a build a tagből (`vX.Y.Z`) és a GitHub repositoryból
 írja a csomagba; helyi buildnél a `python build.py --version 1.1.0` kapcsolóval adható meg.
 Forrásból futtatva az alapverziót a `ytletolto/_build.py` tárolja.
@@ -113,6 +117,13 @@ nem különbségi javítócsomagot. Nincs külön frissítőszerver vagy hozzáf
 git tag v1.1.0
 git push origin v1.1.0
 ```
+
+## Code signing policy
+
+Az aláírási integráció elő van készítve; a SignPath-fiók és az éles aláírás engedélyezése külön
+beállítást igényel. A szolgáltatói jóváhagyásig a projekt nem állítja, hogy SignPath Foundation
+tanúsítvánnyal rendelkezik. A beállítás, a jogosultságok és a kiadási ellenőrzések részletei:
+[Windows-aláírás](docs/windows-signing.md).
 
 ## Hogyan működik
 

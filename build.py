@@ -65,6 +65,38 @@ def vendor_binaries() -> list[str]:
     return [f"{p}{os.pathsep}." for p in files]
 
 
+def windows_version_file(version: str) -> Path:
+    """Set the PE metadata required by the release signing policy."""
+    parts = version_tuple(version)
+    if any(part > 65535 for part in parts):
+        raise ValueError("A Windows-verzió részei legfeljebb 65535 értékűek lehetnek.")
+    normalized = ".".join(map(str, parts))
+    fixed_version = (*parts, 0)
+    strings = {
+        "CompanyName": "Media Minds",
+        "FileDescription": APP_NAME,
+        "FileVersion": normalized,
+        "InternalName": APP_NAME,
+        "OriginalFilename": f"{APP_NAME}.exe",
+        "ProductName": APP_NAME,
+        "ProductVersion": normalized,
+    }
+    entries = ",\n".join(f"        StringStruct({key!r}, {value!r})" for key, value in strings.items())
+    path = ROOT / "build" / "windows-version.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "VSVersionInfo(\n"
+        f"  ffi=FixedFileInfo(filevers={fixed_version!r}, prodvers={fixed_version!r},\n"
+        "    mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),\n"
+        "  kids=[StringFileInfo([StringTable('040904B0', [\n"
+        f"{entries}\n"
+        "  ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])]\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--onefile", action="store_true", help="egyetlen .exe a mappa helyett")
@@ -94,6 +126,8 @@ def main() -> None:
         "--workpath", str(ROOT / "build"),
         "--specpath", str(ROOT / "build"),
     ]
+    if sys.platform == "win32":
+        pyinstaller_args += ["--version-file", str(windows_version_file(args.version))]
     icon = ROOT / "assets" / ("icon.ico" if sys.platform == "win32" else "icon.png")
     if sys.platform == "darwin":
         pyinstaller_args += ["--osx-bundle-identifier", "hu.mediaminds.downloader"]

@@ -280,6 +280,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .chips span:hover { border-color: var(--green-light); color: var(--green-light); }
 .chips input:checked + span { color: var(--on-gradient); background: var(--gradient); border-color: transparent; box-shadow: 0 0 14px rgba(117, 234, 117, 0.3); }
 .chips small { margin-left: 6px; font-size: 12px; font-weight: 500; opacity: 0.7; }
+/* Részletnél a teljes fájl mérete nem érvényes, de a helye maradjon meg. */
+.chips.has-section small { visibility: hidden; }
 .chips input:focus-visible + span { outline: 2px solid var(--green-light); outline-offset: 3px; }
 
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; }
@@ -343,7 +345,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .playlist-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .playlist-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .playlist-text small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.playlist-range { color: var(--green-light) !important; }
+.playlist-range { min-height: 1.55em; color: var(--green-light) !important; }
+/* A kijelölés felirata ne tolja el a lista alatti szerkesztőt húzás közben. */
+.playlist-range[hidden] { display: block !important; visibility: hidden; }
 .playlist-loading { display: flex; flex-direction: column; gap: 10px; }
 .playlist-loading .line { height: 36px; border-radius: 12px; margin: 0; }
 

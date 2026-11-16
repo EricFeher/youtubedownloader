@@ -493,11 +493,15 @@ function renderRange() {
     if (label) label.hidden = true;
   }
   el.rangeSection.hidden = !options || duration < 1 || Boolean(info?.is_live);
-  if (el.rangeSection.hidden) return;
+  if (el.rangeSection.hidden) {
+    el.quality.classList.remove("has-section");
+    return;
+  }
   const start = Math.min(options.start_time ?? 0, duration - 1);
   const end = Math.max(start + 1, Math.min(options.end_time ?? duration, duration));
   options.start_time = start;
   options.end_time = end === duration ? null : end;
+  el.quality.classList.toggle("has-section", hasSection());
   el.rangeStart.max = el.rangeEnd.max = duration;
   el.rangeStart.value = start;
   el.rangeEnd.value = end;
@@ -528,7 +532,6 @@ function changeRange(side, value) {
   if (side === "start") options.start_time = Math.max(0, Math.min(value, Number(el.rangeEnd.value) - 1));
   else options.end_time = Math.min(duration, Math.max(value, Number(el.rangeStart.value) + 1));
   renderRange();
-  renderQualities();
 }
 
 for (const [side, input] of [["start", el.rangeStart], ["end", el.rangeEnd]]) {
@@ -574,7 +577,6 @@ el.rangeReset.addEventListener("click", () => {
   options.start_time = 0;
   options.end_time = null;
   renderRange();
-  renderQualities();
 });
 
 // --- Minőség -----------------------------------------------------------------
@@ -606,8 +608,8 @@ function qualityChips() {
   const [top, ...rest] = available;
   const shown = top.tier > MIN_TIER ? rest.filter((q) => q.tier >= MIN_TIER) : rest;
   return [
-    { value: "best", label: `Legjobb · ${tierLabel(top.tier, top.fps)}`, size: hasSection() ? null : top.size, tier: top.tier },
-    ...shown.map((q) => ({ value: String(q.tier), label: tierLabel(q.tier, q.fps), size: hasSection() ? null : q.size, tier: q.tier })),
+    { value: "best", label: `Legjobb · ${tierLabel(top.tier, top.fps)}`, size: top.size, tier: top.tier },
+    ...shown.map((q) => ({ value: String(q.tier), label: tierLabel(q.tier, q.fps), size: q.size, tier: q.tier })),
   ];
 }
 

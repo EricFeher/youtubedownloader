@@ -197,6 +197,43 @@ def test_single_video_slider_drag_keyboard_reset_and_download(page):
     expect(page.locator("#range-section")).to_be_hidden()
 
 
+@pytest.mark.parametrize("playlist", [False, True])
+@pytest.mark.parametrize("side", ["start", "end"])
+def test_dragging_range_keeps_layout_and_quality_controls_stable(page, playlist, side):
+    page.set_viewport_size({"width": 600, "height": 700})
+    page.locator("#url").fill("https://youtube.com/playlist?list=PL" if playlist else "https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    if playlist:
+        expect(page.locator("#editor-title")).to_have_text("Első videó")
+    page.evaluate("document.fonts.ready")
+    page.locator('#quality input[value="720"]').check(force=True)
+    page.locator("#range-slider").scroll_into_view_if_needed()
+    # A minőségválasztó a húzás alatt is ugyanazokat az elemeket tartsa meg.
+    page.evaluate("window.qualityBeforeDrag = [...document.querySelector('#quality').children]")
+    measure = """() => ({
+      scroll: scrollY,
+      boxes: ['#range-slider', '#quality', 'form.card'].map(selector => {
+        const rect = document.querySelector(selector).getBoundingClientRect();
+        return [rect.x, rect.y, rect.width, rect.height];
+      })
+    })"""
+    before = page.evaluate(measure)
+    bounds = page.locator("#range-slider").bounding_box()
+    x, y, width = bounds["x"] + 12, bounds["y"] + 24, bounds["width"] - 24
+    page.mouse.move(x + (width if side == "end" else 0), y)
+    page.mouse.down()
+    for fraction in ([0.9, 0.6, 0.3, 1] if side == "end" else [0.1, 0.3, 0.6, 0]):
+        page.mouse.move(x + width * fraction, y, steps=5)
+        assert page.evaluate(measure) == before
+        assert page.evaluate("window.qualityBeforeDrag.every((node, i) => node === document.querySelector('#quality').children[i])")
+        expect(page.locator('#quality input[value="720"]')).to_be_checked()
+        if fraction not in (0, 1):
+            expect(page.locator("#quality small").first).to_be_hidden()
+    page.mouse.up()
+    expect(page.locator(f"#range-{side}")).to_have_value("120" if side == "end" else "0")
+    expect(page.locator("#quality small").first).to_be_visible()
+
+
 def test_late_metadata_cannot_replace_active_video(page):
     page.evaluate("window.deferId='two'")
     page.locator("#url").fill("https://youtube.com/playlist?list=PL")
@@ -251,21 +288,49 @@ def test_full_range_sends_no_cut_and_checkbox_does_not_change_editor(page):
     assert all(item["options"]["start_time"] == 0 and item["options"]["end_time"] is None for item in payload["items"][0]["selection"])
 
 
-def test_close_range_handles_can_both_be_dragged(page):
+@pytest.mark.parametrize("side,initial,target,offset_x,offset_y", [
+    ("start", 20, 40, -15, 19),
+    ("end", 100, 80, 15, -19),
+])
+def test_range_handles_can_be_grabbed_outside_visible_circle(page, side, initial, target, offset_x, offset_y):
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    set_range(page, "start", 20)
+    set_range(page, "end", 100)
+    bounds = page.locator("#range-slider").bounding_box()
+    width = bounds["width"] - 24
+    x = bounds["x"] + 12 + width * initial / 120 + offset_x
+    y = bounds["y"] + 24 + offset_y
+    page.mouse.move(x, y)
+    page.mouse.down()
+    # A láthatatlan fogási terület szélén megfogva se ugorjon el az időpont.
+    expect(page.locator(f"#range-{side}")).to_have_value(str(initial))
+    page.mouse.move(x + width * (target - initial) / 120, y, steps=8)
+    page.mouse.up()
+    expect(page.locator(f"#range-{side}")).to_have_value(str(target))
+    expect(page.locator("#range-end" if side == "start" else "#range-start")).to_have_value("100" if side == "start" else "20")
+
+
+@pytest.mark.parametrize("side", ["start", "end"])
+@pytest.mark.parametrize("end", [61, 66])
+def test_close_range_handles_can_both_be_dragged(page, side, end):
     page.locator("#url").fill("https://youtu.be/one")
     expect(page.locator("#range-section")).to_be_visible()
     set_range(page, "start", 60)
-    set_range(page, "end", 61)
+    set_range(page, "end", end)
     bounds = page.locator("#range-slider").bounding_box()
     width, y = bounds["width"] - 24, bounds["y"] + 24
-    # Az összecsúszott fogantyúk bal felét megfogva a kezdet mozdul.
-    x = bounds["x"] + 12 + width * 60 / 120 - 4
+    # Az összecsúszott fogantyúk két fele a megfelelő végpontot mozgassa.
+    offset = (-4 if end == 61 else 12) * (1 if side == "start" else -1)
+    x = bounds["x"] + 12 + width * (60 if side == "start" else end) / 120 + offset
     page.mouse.move(x, y)
     page.mouse.down()
-    page.mouse.move(bounds["x"] + 12 + width / 4, y, steps=8)
+    expect(page.locator("#range-start")).to_have_value("60")
+    expect(page.locator("#range-end")).to_have_value(str(end))
+    page.mouse.move(bounds["x"] + 12 + width * (0.25 if side == "start" else 0.75) + offset, y, steps=8)
     page.mouse.up()
-    expect(page.locator("#range-start")).to_have_value("30")
-    expect(page.locator("#range-end")).to_have_value("61")
+    expect(page.locator("#range-start")).to_have_value("30" if side == "start" else "60")
+    expect(page.locator("#range-end")).to_have_value(str(end) if side == "start" else "90")
 
 
 def test_queue_updates_video_image_even_when_download_state_is_unchanged(page):

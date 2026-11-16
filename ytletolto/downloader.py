@@ -17,6 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import yt_dlp
+from yt_dlp.postprocessor.ffmpeg import FFmpegPostProcessor
 from yt_dlp.utils import DownloadCancelled, DownloadError
 
 
@@ -650,8 +651,15 @@ class Downloader:
                     opts["paths"]["temp"] = str(Path(temp_dir).resolve())
                     download_result = None
                     try:
-                        with ydl_class(opts) as ydl:
-                            failed |= bool(ydl.download([request.url]))
+                        # A yt-dlp FFmpegFD ellenőrzése nem kapja meg az opts-ot;
+                        # a CLI is ezen a kontextusváltozón adja át az útvonalat.
+                        location = FFmpegPostProcessor._ffmpeg_location
+                        token = location.set(str(self._tools.ffmpeg_dir))
+                        try:
+                            with ydl_class(opts) as ydl:
+                                failed |= bool(ydl.download([request.url]))
+                        finally:
+                            location.reset(token)
                     except DownloadCancelled:
                         download_result = Finished(False, "Letöltés megszakítva.", tuple(files))
                     except DownloadError as e:

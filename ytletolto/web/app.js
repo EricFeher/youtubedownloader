@@ -544,33 +544,32 @@ for (const [side, input] of [["start", el.rangeStart], ["end", el.rangeEnd]]) {
   });
 }
 
-let draggedRangeSide = null;
-el.rangeSlider.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || el.rangeSection.hidden) return;
-  const bounds = el.rangeSlider.getBoundingClientRect();
-  const duration = Number(el.rangeEnd.max), width = Math.max(1, bounds.width - 24);
-  const startX = Number(el.rangeStart.value) / duration * width;
-  const endX = Number(el.rangeEnd.value) / duration * width;
-  const overlapping = endX - startX < 24;
-  const nativeThumb = event.target === el.rangeStart || event.target === el.rangeEnd;
-  if (nativeThumb && !overlapping) return;
-  if (nativeThumb) event.preventDefault();
-  const x = event.clientX - bounds.left - 12;
-  const value = Math.round(Math.max(0, Math.min(1, x / width)) * duration);
-  draggedRangeSide = overlapping
-    ? (x <= (startX + endX) / 2 ? "start" : "end")
-    : (Math.abs(x - startX) <= Math.abs(x - endX) ? "start" : "end");
-  el.rangeSlider.setPointerCapture(event.pointerId);
-  (draggedRangeSide === "start" ? el.rangeStart : el.rangeEnd).focus();
-  changeRange(draggedRangeSide, value);
-});
-el.rangeSlider.addEventListener("pointermove", (event) => {
-  if (!draggedRangeSide) return;
-  const bounds = el.rangeSlider.getBoundingClientRect();
-  const value = Math.round(Math.max(0, Math.min(1, (event.clientX - bounds.left - 12) / Math.max(1, bounds.width - 24))) * Number(el.rangeEnd.max));
-  changeRange(draggedRangeSide, value);
-});
-for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) el.rangeSlider.addEventListener(event, () => { draggedRangeSide = null; });
+let draggedRangeSide = null;
+let draggedRangeOffset = 0;
+el.rangeSlider.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || el.rangeSection.hidden) return;
+  event.preventDefault();
+  const bounds = el.rangeSlider.getBoundingClientRect();
+  const duration = Number(el.rangeEnd.max), width = Math.max(1, bounds.width - 24);
+  const startX = Number(el.rangeStart.value) / duration * width;
+  const endX = Number(el.rangeEnd.value) / duration * width;
+  const nativeThumb = event.target === el.rangeStart || event.target === el.rangeEnd;
+  const x = event.clientX - bounds.left - 12;
+  const value = Math.round(Math.max(0, Math.min(1, x / width)) * duration);
+  draggedRangeSide = Math.abs(x - startX) <= Math.abs(x - endX) ? "start" : "end";
+  // A fogási terület szélét megfogva is maradjon meg az egér és a kör távolsága.
+  draggedRangeOffset = nativeThumb ? x - (draggedRangeSide === "start" ? startX : endX) : 0;
+  el.rangeSlider.setPointerCapture(event.pointerId);
+  (draggedRangeSide === "start" ? el.rangeStart : el.rangeEnd).focus({ preventScroll: true });
+  if (!nativeThumb) changeRange(draggedRangeSide, value);
+});
+el.rangeSlider.addEventListener("pointermove", (event) => {
+  if (!draggedRangeSide) return;
+  const bounds = el.rangeSlider.getBoundingClientRect();
+  const value = Math.round(Math.max(0, Math.min(1, (event.clientX - bounds.left - 12 - draggedRangeOffset) / Math.max(1, bounds.width - 24))) * Number(el.rangeEnd.max));
+  changeRange(draggedRangeSide, value);
+});
+for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) el.rangeSlider.addEventListener(event, () => { draggedRangeSide = null; });
 el.rangeReset.addEventListener("click", () => {
   const options = editorOptions();
   if (!options) return;

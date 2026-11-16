@@ -165,6 +165,8 @@ def test_playlist_editor_keeps_individual_settings_and_sends_them(page):
     assert two["options"]["audio_format"] == "opus"
     assert one["thumbnail"] == "video-one.jpg"
     assert two["thumbnail"] == "video-two.jpg"
+    assert (one["title"], two["title"]) == ("Első videó", "Második videó")
+    assert payload["items"][0]["playlist_title"] == "Tesztlista"
     assert (two["options"]["start_time"], two["options"]["end_time"]) == (45, 90)
     assert page.evaluate("window.recorded.saved") == []
 
@@ -280,3 +282,35 @@ def test_queue_updates_video_image_even_when_download_state_is_unchanged(page):
     page.evaluate("window.app.onEvent({type:'queue',version:3,items:[{...window.queueItem,thumbnail:null}]})")
     assert thumb.evaluate("el => el.style.backgroundImage") == ""
     expect(thumb).not_to_have_class("q-thumb has-image")
+
+
+@pytest.mark.parametrize("mode", ["video", "audio"])
+def test_queue_shows_current_video_title_and_separate_playlist_label(page, mode):
+    page.set_viewport_size({"width": 600, "height": 700})
+    page.evaluate("""mode => {
+      window.queueItem = {id:1,url:'https://youtube.com/playlist?list=PL',title:'Első videó',playlist_title:'Tesztlista',
+        mode,container:'mp4',audio_format:'mp3',playlist:true,state:'queued',files:[]};
+      window.app.onEvent({type:'queue',version:1,items:[window.queueItem]});
+    }""", mode)
+    expect(page.locator(".q-title")).to_have_text("Első videó")
+    expect(page.locator(".q-playlist")).to_have_text("Lejátszási lista: Tesztlista")
+    page.evaluate("""() => {
+      window.app.onEvent({type:'queue',version:2,items:[{...window.queueItem,state:'running'}]});
+      window.app.onEvent({type:'queue',version:3,items:[{...window.queueItem,state:'running',title:'Második videó'}]});
+    }""")
+    expect(page.locator(".q-title")).to_have_text("Második videó")
+    expect(page.locator(".q-playlist")).to_have_text("Lejátszási lista: Tesztlista")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.evaluate("window.app.onEvent({type:'queue',version:4,items:[{...window.queueItem,playlist:false,playlist_title:''}]})")
+    expect(page.locator(".q-playlist")).to_be_hidden()
+
+
+def test_playlist_from_video_link_sends_playlist_name_and_selected_video_title(page):
+    page.locator("#url").fill("https://youtube.com/watch?v=one&list=PL")
+    expect(page.locator("#title")).to_have_text("Első videó")
+    page.locator("#playlist").check()
+    expect(page.locator("#editor-title")).to_have_text("Első videó")
+    page.locator("#download-btn").click()
+    payload = page.evaluate("window.recorded.enqueued[0]")
+    assert payload["items"][0]["playlist_title"] == "Tesztlista"
+    assert payload["items"][0]["selection"][0]["title"] == "Első videó"

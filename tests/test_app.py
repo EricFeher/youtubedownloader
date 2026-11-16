@@ -110,7 +110,7 @@ def test_enqueue_preserves_playlist_selection_and_modes(api, selection, expected
     queued = api._queue.snapshot().items
     assert result == {"ok": True, "added": len(expected), "skipped": 0}
     assert [(i.request.mode.value, i.request.playlist_ids) for i in queued] == expected
-    assert all(i.title == "Kiválasztott lista" for i in queued)
+    assert all(i.title == "" and i.playlist_title == "Kiválasztott lista" for i in queued)
 
 
 def test_enqueue_empty_playlist_selection_does_not_download_whole_list(api):
@@ -153,16 +153,19 @@ def test_playlist_item_options_do_not_overwrite_global_defaults(api):
 
 def test_playlist_groups_start_with_their_first_video_thumbnail(api):
     result = api.enqueue({"items": [{
-        "url": "https://youtube.com/playlist?list=PL", "thumbnail": "playlist.jpg",
+        "url": "https://youtube.com/playlist?list=PL", "thumbnail": "playlist.jpg", "playlist_title": "Tesztlista",
         "selection": [
-            {"id": "a", "thumbnail": "a.jpg", "options": {}},
-            {"id": "b", "thumbnail": "b.jpg", "options": {}},
-            {"id": "c", "thumbnail": "c.jpg", "options": {"mode": "audio"}},
+            {"id": "a", "title": "Első videó", "thumbnail": "a.jpg", "options": {}},
+            {"id": "b", "title": "Második videó", "thumbnail": "b.jpg", "options": {}},
+            {"id": "c", "title": "Harmadik hang", "thumbnail": "c.jpg", "options": {"mode": "audio"}},
         ],
     }]})
     assert result["ok"] and api._queue.wait_idle(5)
     assert [(item.request.playlist_ids, item.thumbnail) for item in api._queue.snapshot().items] == [
         (("a", "b"), "a.jpg"), (("c",), "c.jpg"),
+    ]
+    assert [(item.title, item.playlist_title) for item in api._queue.snapshot().items] == [
+        ("Első videó", "Tesztlista"), ("Harmadik hang", "Tesztlista"),
     ]
 
 

@@ -37,6 +37,7 @@ class QueueItem:
     message: str = ""
     files: tuple[str, ...] = ()
     status: str = ""  # a futó letöltés utolsó állapotüzenete
+    playlist_title: str = ""
 
     def to_dict(self) -> dict:
         r = self.request
@@ -55,6 +56,7 @@ class QueueItem:
             "max_height": r.max_height,
             "compatible": r.compatible,
             "playlist": r.playlist,
+            "playlist_title": self.playlist_title,
             "start_time": r.start_time,
             "end_time": r.end_time,
         }
@@ -122,19 +124,20 @@ class DownloadQueue:
             self._version += 1
             return QueueChanged(self._version, tuple(dataclasses.replace(i) for i in self._items))
 
-    def add(self, request: DownloadRequest, title: str = "", thumbnail: str | None = None) -> QueueItem | None:
+    def add(self, request: DownloadRequest, title: str = "", thumbnail: str | None = None, *,
+            playlist_title: str = "") -> QueueItem | None:
         """Sorba állít egy letöltést. Ha pontosan ez már várakozik vagy fut, nem veszi fel újra (None)."""
-        return self.add_many([(request, title, thumbnail)])[0]
+        return self.add_many([(request, title, thumbnail, playlist_title)])[0]
 
-    def add_many(self, entries: list[tuple[DownloadRequest, str, str | None]]) -> list[QueueItem | None]:
+    def add_many(self, entries: list[tuple[DownloadRequest, str, str | None, str]]) -> list[QueueItem | None]:
         """Több letöltés sorba állítása egyetlen állapotképpel; az ismétlődők helyén None."""
         added: list[QueueItem | None] = []
         with self._lock:
-            for request, title, thumbnail in entries:
+            for request, title, thumbnail, playlist_title in entries:
                 if self._closed or self._is_pending_locked(request):
                     added.append(None)
                     continue
-                item = QueueItem(next(self._ids), request, title, thumbnail)
+                item = QueueItem(next(self._ids), request, title, thumbnail, playlist_title=playlist_title)
                 self._items.append(item)
                 added.append(dataclasses.replace(item))
             self._start_next_locked()
@@ -279,17 +282,21 @@ class DownloadQueue:
             with self._lock:
                 self._finish_locked(item, event)
             return
-        title_found = False
+        metadata_changed = False
         with self._lock:
             if self._closed:
                 return
             if isinstance(event, Status):
                 # Az állapotképbe is bekerül: az indulás utáni első üzenet megelőzheti a „fut” állapotképet.
                 item.status = event.text
-            elif isinstance(event, Progress) and event.title and not item.title:
-                item.title = event.title
-                title_found = True
-        if title_found:
+            elif isinstance(event, Progress):
+                if event.title and (not item.title or item.request.playlist) and item.title != event.title:
+                    item.title = event.title
+                    metadata_changed = True
+                if item.request.playlist and event.playlist_title and item.playlist_title != event.playlist_title:
+                    item.playlist_title = event.playlist_title
+                    metadata_changed = True
+        if metadata_changed:
             self._changed()
         self._emit(ItemEvent(item.id, event))
 

@@ -9,8 +9,8 @@ import re
 import shutil
 import sys
 import threading
-from collections.abc import Callable, Iterable
-from contextlib import nullcontext
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -79,8 +79,9 @@ class Progress:
     filename: str
     item: str  # pl. "2/15" lejátszási listánál, különben üres
     kind: str  # "video" | "audio" – melyik sáv töltődik épp
-    title: str = ""  # a videó, lejátszási listánál a lista címe
+    title: str = ""  # az aktuális videó vagy hang címe
     mode: str = Mode.VIDEO.value  # a letöltés módja: videó vagy csak hang
+    playlist_title: str = ""
 
 
 @dataclass(frozen=True)
@@ -548,6 +549,24 @@ _POSTPROCESSOR_LABELS = {
 }
 
 
+@contextmanager
+def _download_workspace(request: DownloadRequest) -> Iterator[str]:
+    existing = {path.name for path in request.output_dir.iterdir()} if request.playlist else set()
+    with TemporaryDirectory(prefix=".mm-download-", dir=request.output_dir) as temp_dir:
+        try:
+            yield temp_dir
+        finally:
+            if request.playlist:
+                # A sablon a munkamappában és a célmappában is ugyanazt a playlist-
+                # almappát használja. Csak az itt ténylegesen érintett, új mappát takarítjuk.
+                for directory in Path(temp_dir).iterdir():
+                    if directory.is_dir() and directory.name not in existing:
+                        try:
+                            (request.output_dir / directory.name).rmdir()
+                        except OSError:
+                            pass  # Nem üres (pl. egy korábbi listaelem már elkészült), vagy nem törölhető.
+
+
 class Downloader:
     """Egy letöltés futtatása. A `run` blokkol, ezért háttérszálon kell hívni."""
 
@@ -626,7 +645,7 @@ class Downloader:
                 # Csak ennek a menetnek a köztes fájljait töröljük; a kész médiafájlokat
                 # a yt-dlp MoveFiles lépése a végleges helyükre mozgatja.
                 workspace = (nullcontext(str(self._temp_dir)) if self._temp_dir is not None else
-                             TemporaryDirectory(prefix=".mm-download-", dir=request.output_dir))
+                             _download_workspace(request))
                 with workspace as temp_dir:
                     opts["paths"]["temp"] = str(Path(temp_dir).resolve())
                     download_result = None
@@ -693,16 +712,17 @@ class Downloader:
             item = f"{self._item_offset + number}/{self._item_total}"
         filename = Path(d.get("filename") or "").name
         kind = "audio" if info.get("vcodec") == "none" else "video"
-        title = (info.get("playlist_title") if item else None) or info.get("title") or ""
+        title = info.get("title") or ""
+        playlist_title = info.get("playlist_title") or ""
         mode = self._mode.value
 
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             done = d.get("downloaded_bytes") or 0
             percent = done / total * 100 if total else None
-            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item, kind, title, mode))
+            self._emit(Progress(percent, d.get("speed"), d.get("eta"), filename, item, kind, title, mode, playlist_title))
         elif d["status"] == "finished":
-            self._emit(Progress(100.0, None, None, filename, item, kind, title, mode))
+            self._emit(Progress(100.0, None, None, filename, item, kind, title, mode, playlist_title))
 
     def _on_postprocess(self, files: list[str]) -> Callable[[dict], None]:
         def hook(d: dict) -> None:

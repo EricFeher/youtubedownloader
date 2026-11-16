@@ -447,6 +447,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 .q-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .q-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.q-playlist { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
 .q-meta { display: flex; gap: 6px; min-width: 0; font-size: 13px; color: var(--muted); }
 .q-format { flex: none; font-weight: 600; color: var(--green-light); }
 .q-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }

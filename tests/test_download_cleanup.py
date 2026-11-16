@@ -10,7 +10,7 @@ import pytest
 import yt_dlp
 from yt_dlp.utils import DownloadError
 
-from ytletolto.downloader import DownloadRequest, Downloader, Finished, Mode, Progress, Tools
+from ytletolto.downloader import DownloadRequest, Downloader, Finished, Log, Mode, Progress, Tools
 
 
 @pytest.fixture
@@ -53,6 +53,54 @@ def test_cancelled_http_download_removes_partial_files(local_video, tmp_path, fi
     assert events[-1] == Finished(False, "Letöltés megszakítva.")
     assert list(output.iterdir()) == [existing]
     assert existing.read_bytes() == b"keep"
+
+
+@pytest.mark.parametrize("mode", [Mode.VIDEO, Mode.AUDIO])
+@pytest.mark.parametrize("outcome", ["cancel", "error"])
+@pytest.mark.parametrize("existing", ["absent", "empty", "nonempty"])
+def test_failed_playlist_removes_only_new_empty_destination(local_video, tmp_path, monkeypatch, mode, outcome, existing):
+    output = tmp_path / "out"
+    output.mkdir()
+    playlist = output / "Test playlist"
+    unrelated = output / "Unrelated empty folder"
+    unrelated.mkdir()
+    if existing != "absent":
+        playlist.mkdir()
+    if existing == "nonempty":
+        (playlist / "previous.mp4").write_bytes(b"keep")
+    events = []
+
+    class LocalPlaylistYDL(yt_dlp.YoutubeDL):
+        def download(self, urls):
+            self.process_ie_result({
+                "_type": "playlist", "id": "PL", "title": "Test playlist", "extractor": "test", "extractor_key": "Test",
+                "entries": [{"id": "video", "title": "Video", "url": local_video,
+                             "ext": "mp4", "extractor": "test", "extractor_key": "Test"}],
+            })
+            return self._download_retcode
+
+    def emit(event):
+        events.append(event)
+        if isinstance(event, Progress):
+            assert playlist.is_dir()
+            if outcome == "error":
+                raise DownloadError("test download error")
+            downloader.cancel()
+
+    monkeypatch.setattr("ytletolto.downloader.yt_dlp.YoutubeDL", LocalPlaylistYDL)
+    downloader = Downloader(emit, Tools(ffmpeg_dir=Path("/ffmpeg")))
+    downloader.run(DownloadRequest("local-playlist", output, mode, playlist=True))
+
+    assert isinstance(events[-1], Finished) and not events[-1].ok
+    if outcome == "cancel":
+        assert "megszakítva" in events[-1].message
+    else:
+        assert any(isinstance(event, Log) and "test download error" in event.text for event in events)
+    assert playlist.exists() is (existing != "absent")
+    assert unrelated.is_dir() and output.is_dir()
+    assert not list(output.glob(".mm-download-*"))
+    if existing == "nonempty":
+        assert (playlist / "previous.mp4").read_bytes() == b"keep"
 
 
 def test_application_exit_waits_for_cancelled_download_cleanup(local_video, tmp_path):
@@ -152,6 +200,8 @@ def _section_leaving_partial_files(request, tools, events, temp_dir):
         os.setsid()
     nested = temp_dir / "Playlist"
     nested.mkdir()
+    if request.playlist:
+        (request.output_dir / "Playlist").mkdir(exist_ok=True)
     # A fájl nyitva marad: a szülő csak a worker leállítása után törölheti Windows-on.
     with (nested / "video.mp4.part").open("wb") as stream:
         stream.write(b"partial video")
@@ -162,7 +212,8 @@ def _section_leaving_partial_files(request, tools, events, temp_dir):
 
 
 @pytest.mark.parametrize("outcome", ["cancel", "crash"])
-def test_section_parent_cleans_files_after_worker_is_stopped(monkeypatch, tmp_path, outcome):
+@pytest.mark.parametrize("playlist", [False, True])
+def test_section_parent_cleans_files_after_worker_is_stopped(monkeypatch, tmp_path, outcome, playlist):
     from ytletolto import section_worker
     from ytletolto.downloader import Status
 
@@ -178,7 +229,7 @@ def test_section_parent_cleans_files_after_worker_is_stopped(monkeypatch, tmp_pa
             cancel.set()
 
     result = section_worker.download_section(
-        DownloadRequest(outcome, tmp_path, Mode.VIDEO, end_time=10), Tools(None), emit, cancel,
+        DownloadRequest(outcome, tmp_path, Mode.VIDEO, end_time=10, playlist=playlist), Tools(None), emit, cancel,
     )
 
     assert not result.ok

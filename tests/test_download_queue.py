@@ -217,7 +217,7 @@ def test_add_many_skips_duplicates_and_emits_one_snapshot(h):
     assert h.blocking.wait(TIMEOUT)
     before = len(h.snapshots())
 
-    added = h.queue.add_many([(request(u), "", None) for u in ("https://youtu.be/a", "https://youtu.be/block", "https://youtu.be/a")])
+    added = h.queue.add_many([(request(u), "", None, "") for u in ("https://youtu.be/a", "https://youtu.be/block", "https://youtu.be/a")])
 
     assert [item is not None for item in added] == [True, False, False]
     assert len(h.snapshots()) == before + 1
@@ -349,7 +349,7 @@ def test_event_payload_is_json_serialisable(h):
         "id": 0, "url": "https://youtu.be/ok", "title": "Cím: ok", "thumbnail": None, "state": "done",
         "message": "Kész!", "files": ["/out/ok.mp4"], "status": "Videó adatainak lekérése…", "mode": "video", "container": "mp4",
         "audio_format": "mp3", "max_height": None, "compatible": False, "playlist": False,
-        "start_time": 0, "end_time": None,
+        "start_time": 0, "end_time": None, "playlist_title": "",
     }
     progress = next(p for p in payloads if p["type"] == "progress")
     assert progress["id"] == queue["items"][0]["id"] and progress["percent"] == 50.0
@@ -421,7 +421,8 @@ def test_build_request_normalises_unknown_options():
     ("info", "title"),
     [
         ({"title": "Videó"}, "Videó"),
-        ({"title": "3. rész", "playlist_title": "Lista", "playlist_index": 3, "n_entries": 9}, "Lista"),
+        ({"title": "3. rész", "playlist_title": "Lista", "playlist_index": 3, "n_entries": 9}, "3. rész"),
+        ({"title": "Videó", "playlist_title": "Lista"}, "Videó"),
         ({}, ""),
     ],
 )
@@ -432,3 +433,34 @@ def test_progress_carries_video_or_playlist_title(info, title):
     downloader._on_progress({"status": "downloading", "info_dict": info, "downloaded_bytes": 5, "total_bytes": 10})
 
     assert events[0].title == title and events[0].percent == 50.0
+    assert events[0].playlist_title == info.get("playlist_title", "")
+
+
+@pytest.mark.parametrize("mode", [Mode.VIDEO, Mode.AUDIO])
+def test_playlist_title_follows_each_video_and_keeps_playlist_name(mode):
+    events = []
+
+    class Runner:
+        def __init__(self, emit):
+            self.emit = emit
+
+        def run(self, request):
+            for title in ("Első videó", "Második videó"):
+                self.emit(Progress(50, None, None, "x.mp4", "1/2", "video", title,
+                                   mode.value, playlist_title="Tesztlista"))
+            self.emit(Finished(True, "Kész!"))
+
+        def cancel(self):
+            pass
+
+    queue = DownloadQueue(events.append, Runner)
+    try:
+        queue.add(request(playlist=True, mode=mode), title="Előzetes videócím", playlist_title="Előzetes listacím")
+        assert queue.wait_idle(TIMEOUT)
+        titles = [e.items[0].title for e in events if isinstance(e, QueueChanged)]
+        assert "Első videó" in titles and "Második videó" in titles
+        item = queue.snapshot().items[0]
+        assert item.title == "Második videó" and item.playlist_title == "Tesztlista"
+        assert item.to_dict()["playlist_title"] == "Tesztlista"
+    finally:
+        queue.shutdown()

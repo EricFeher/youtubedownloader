@@ -10,9 +10,8 @@ import subprocess
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
-from .downloader import DownloadRequest, Downloader, Event, Finished, Tools
+from .downloader import DownloadRequest, Downloader, Event, Finished, Tools, _download_workspace
 
 
 def _run(request: DownloadRequest, tools: Tools, events, temp_dir: Path) -> None:
@@ -49,7 +48,7 @@ def download_section(request: DownloadRequest, tools: Tools, emit: Callable[[Eve
         return Finished(False, "Letöltés megszakítva.")
     request.output_dir.mkdir(parents=True, exist_ok=True)
     # A szülő takarít, miután a worker és az ffmpeg is leállt, kényszerített megszakításkor is.
-    with TemporaryDirectory(prefix=".mm-download-", dir=request.output_dir) as temp_dir:
+    with _download_workspace(request) as temp_dir:
         return _download_section(request, tools, emit, cancel, Path(temp_dir).resolve())
 
 

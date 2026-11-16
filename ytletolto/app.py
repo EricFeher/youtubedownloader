@@ -147,11 +147,16 @@ class Api:
                 return {"ok": False, "error": "Jelölj ki legalább egy elemet a listában."}
             selection = entry.get("selection")
             for request in requests:
+                title = entry.get("title") or ""
+                playlist_title = (entry.get("playlist_title", title) or "") if playlist else ""
+                if playlist:
+                    title = ""
                 thumbnail = entry.get("thumbnail") if not playlist else None
                 if playlist and request.playlist_ids and isinstance(selection, list):
                     first = next((item for item in selection if isinstance(item, dict) and item.get("id") == request.playlist_ids[0]), {})
                     thumbnail = first.get("thumbnail")
-                entries.append((request, entry.get("title") or "", thumbnail))
+                    title = first.get("title") or ""
+                entries.append((request, title, thumbnail, playlist_title))
         if not entries:
             return {"ok": False, "error": "Adj meg egy linket."}
         if not self._tools.ffmpeg_dir:

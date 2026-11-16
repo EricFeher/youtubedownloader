@@ -34,7 +34,7 @@ const state = {
   quality: "best", // a felhasználó mentett választása; a kijelölt chip ehhez a legközelebbi elérhető
   batch: [], // több beillesztett link, amíg sorba nem kerülnek
   queueVersion: -1, items: new Map(),
-  playlistToken: 0, playlistUrl: "", entries: [], itemModes: new Map(), excludedItems: new Set(),
+  playlistToken: 0, playlistUrl: "", playlistTitle: "", entries: [], itemModes: new Map(), excludedItems: new Set(),
   activeIndex: null, entryOptions: new Map(), entryInfo: new Map(), entryPending: new Map(),
   singleOptions: null,
   defaults: { mode: "video", quality: "best", container: "mp4", audio_format: "mp3", compatible: false },
@@ -163,7 +163,7 @@ function showPreview(info, url) {
     el.kind.textContent = info.count ? `Lejátszási lista · ${info.count} videó` : "Lejátszási lista";
     el.badge.hidden = el.duration.hidden = true;
     el.playlistRow.hidden = true; // tiszta lista-link: a lista elemeiből választunk
-    showPlaylist(info.entries, url);
+    showPlaylist(info.entries, url, info.title);
   } else {
     state.singleOptions = { ...state.defaults, start_time: 0, end_time: null };
     restoreOptions(state.singleOptions);
@@ -200,6 +200,7 @@ function modeCounts() {
 function clearPlaylist() {
   state.playlistToken++;
   state.playlistUrl = "";
+  state.playlistTitle = "";
   state.entries = [];
   state.itemModes = new Map();
   state.excludedItems = new Set();
@@ -211,9 +212,10 @@ function clearPlaylist() {
   el.playlistCard.hidden = el.playlistLoading.hidden = el.playlistError.hidden = true;
 }
 
-function showPlaylist(entries, url) {
+function showPlaylist(entries, url, title) {
   state.playlistToken++;
   state.playlistUrl = url;
+  state.playlistTitle = title || "";
   state.entries = entries || [];
   state.itemModes = new Map();
   state.excludedItems = new Set();
@@ -350,6 +352,7 @@ async function loadPlaylist() {
   const res = await api().probe(url, true);
   if (token !== state.playlistToken) return; // közben új link érkezett, vagy kikapcsolták
   el.playlistLoading.hidden = true;
+  if (res.ok && res.info.kind === "playlist") state.playlistTitle = res.info.title || "";
   if (!res.ok || res.info.kind !== "playlist" || !res.info.entries.length) {
     // Az elemek nélkül is letölthető a lista, csak egységesen a felül választott módban.
     el.playlistSummary.textContent = "";
@@ -359,7 +362,7 @@ async function loadPlaylist() {
     applyMode();
     return;
   }
-  showPlaylist(res.info.entries, url);
+  showPlaylist(res.info.entries, url, res.info.title);
 }
 
 el.playlist.addEventListener("change", () => {
@@ -825,11 +828,13 @@ async function submitToQueue() {
       selection: perItemMode() && state.playlistUrl === url
         ? selectedEntries().map((e) => ({
           id: e.id,
+          title: state.entryInfo.get(e.id)?.title ?? e.title,
           thumbnail: state.entryInfo.get(e.id)?.thumbnail ?? e.thumbnail ?? null,
           options: { ...optionsForEntry(e.index) },
         }))
         : null,
       title: info?.title ?? "",
+      playlist_title: playlistSelected() ? state.playlistTitle || (info?.kind === "playlist" ? info.title : "") : "",
       thumbnail: info?.thumbnail ?? null,
       // Előnézet nélkül nem tudjuk, lista-e; ilyenkor a Python a link alakjából dönt.
       playlist: info ? state.isPlaylist || (!el.playlistRow.hidden && el.playlist.checked) : null,
@@ -874,7 +879,6 @@ function formatLabel(item) {
     if (item.max_height) parts.push(tierLabel(item.max_height));
     if (item.compatible && item.container !== "webm") parts.push("kompatibilis");
   }
-  if (item.playlist) parts.push("lista");
   if (item.start_time > 0 || item.end_time != null) parts.push(`${formatDuration(item.start_time ?? 0)} – ${item.end_time == null ? "végéig" : formatDuration(item.end_time)}`);
   return parts.join(" · ");
 }
@@ -935,6 +939,7 @@ function createRow(item) {
     <div class="q-thumb">${item.mode === "audio" ? ICONS.audio : ICONS.video}</div>
     <div class="q-body">
       <div class="q-title"></div>
+      <div class="q-playlist" hidden></div>
       <div class="q-meta"><span class="q-format"></span><span class="q-status"></span></div>
       <div class="bar" hidden><div class="bar-fill"></div></div>
     </div>
@@ -966,8 +971,12 @@ function logTransition(item) {
 
 function updateRow(row, item) {
   const title = row.querySelector(".q-title");
-  title.textContent = item.title || item.url;
+  title.textContent = item.title || (item.playlist ? "Videó adatainak lekérése…" : item.url);
   title.title = item.url;
+  const playlist = row.querySelector(".q-playlist");
+  playlist.hidden = !item.playlist;
+  playlist.textContent = item.playlist_title ? `Lejátszási lista: ${item.playlist_title}` : "Lejátszási listából";
+  playlist.title = playlist.textContent;
   row.querySelector(".q-format").textContent = formatLabel(item);
   const thumb = row.querySelector(".q-thumb");
   thumb.style.backgroundImage = cssUrl(item.thumbnail);

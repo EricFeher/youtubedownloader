@@ -81,9 +81,23 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 
 /* Fejléc */
+.app-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
 .brand { display: flex; align-items: center; gap: 16px; }
 .brand-logo { width: 52px; height: auto; filter: drop-shadow(0 6px 18px rgba(117, 234, 117, 0.3)); }
 .brand h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+
+.language-picker { position: relative; flex: none; margin-left: auto; font-size: 13px; }
+.language-picker img { width: 21px; height: 14px; border-radius: 3px; pointer-events: none; flex: none; }
+.language-trigger { display: flex; align-items: center; gap: 9px; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.language-trigger:hover, .language-trigger[aria-expanded="true"] { background: var(--surface-strong); border-color: var(--muted); }
+.language-trigger:disabled { cursor: default; opacity: 0.5; }
+.language-picker button:focus-visible { outline: 2px solid var(--green-light); outline-offset: 3px; }
+.language-menu { position: absolute; right: 0; top: calc(100% + 7px); z-index: 10; min-width: 164px; padding: 5px; background: #303030; border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35); }
+.language-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.language-menu button:hover { background: var(--surface-strong); }
+.language-menu button[aria-checked="true"] { color: var(--green-light); background: rgba(117, 234, 117, 0.06); }
+.language-check { margin-left: auto; visibility: hidden; }
+.language-menu button[aria-checked="true"] .language-check { visibility: visible; }
 
 /* Link mező */
 .hero { display: flex; flex-direction: column; gap: 14px; }

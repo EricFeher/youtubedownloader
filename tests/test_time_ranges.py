@@ -14,6 +14,7 @@ from yt_dlp.utils import DownloadError
 
 from ytletolto.download_queue import build_requests
 from ytletolto.downloader import DownloadRequest, Downloader, Finished, Mode, Progress, Status, Thumbnail, Tools, build_ydl_opts, find_tools
+from ytletolto.i18n import TEXT, Message
 
 
 @pytest.mark.parametrize("start,end", [(-1, 10), (10, 10), (20, 10), (float("nan"), 20),
@@ -175,7 +176,8 @@ def test_cancellation_stops_worker_and_its_child(monkeypatch, tmp_path):
 
     started = time.monotonic()
     result = section_worker.download_section(DownloadRequest("url", tmp_path, Mode.VIDEO, end_time=10), Tools(None), emit, cancel)
-    assert not result.ok and "megszakítva" in result.message
+    assert not result.ok
+    assert isinstance(result.message, Message) and result.message.key == TEXT.DOWNLOAD_CANCELLED
     assert time.monotonic() - started < 8
     assert len(children) == 1
     process = subprocess.run(["ps", "-o", "stat=", "-p", str(children[0])], capture_output=True, text=True)

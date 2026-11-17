@@ -160,7 +160,7 @@ def test_missing_asset_explains_unavailable_package(packaged, monkeypatch):
     packaged.check()
     state = packaged.download()
     assert state["status"] == "error"
-    assert "nem tartalmaz" in state["error"]
+    assert "does not have" in state["error"]
 
 
 def test_closing_during_download_discards_staging(packaged, monkeypatch, tmp_path):

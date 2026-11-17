@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .downloader import DownloadRequest, Downloader, Event, Finished, Tools, _download_workspace
+from .i18n import TEXT, Message
 
 
 def _run(request: DownloadRequest, tools: Tools, events, temp_dir: Path) -> None:
@@ -20,7 +21,7 @@ def _run(request: DownloadRequest, tools: Tools, events, temp_dir: Path) -> None
     try:
         Downloader(events.put, tools, _inline_sections=True, _temp_dir=temp_dir).run(request)
     except Exception as exc:
-        events.put(Finished(False, f"Nem sikerült letölteni a részletet: {exc}"))
+        events.put(Finished(False, Message(TEXT.SECTION_DOWNLOAD_FAILED, error=str(exc))))
 
 
 def _stop(process) -> None:
@@ -45,7 +46,7 @@ def _stop(process) -> None:
 
 def download_section(request: DownloadRequest, tools: Tools, emit: Callable[[Event], None], cancel: threading.Event) -> Finished:
     if cancel.is_set():
-        return Finished(False, "Letöltés megszakítva.")
+        return Finished(False, Message(TEXT.DOWNLOAD_CANCELLED))
     request.output_dir.mkdir(parents=True, exist_ok=True)
     # A szülő takarít, miután a worker és az ffmpeg is leállt, kényszerített megszakításkor is.
     with _download_workspace(request) as temp_dir:
@@ -59,18 +60,18 @@ def _download_section(request: DownloadRequest, tools: Tools, emit: Callable[[Ev
     process = context.Process(target=_run, args=(request, tools, events, temp_dir))
     try:
         if cancel.is_set():
-            return Finished(False, "Letöltés megszakítva.")
+            return Finished(False, Message(TEXT.DOWNLOAD_CANCELLED))
         process.start()
         while True:
             if cancel.is_set():
                 _stop(process)
-                return Finished(False, "Letöltés megszakítva.")
+                return Finished(False, Message(TEXT.DOWNLOAD_CANCELLED))
             try:
                 event = events.get(timeout=0.1)
             except queue.Empty:
                 if process.is_alive():
                     continue
-                return Finished(False, "A részletletöltés váratlanul leállt.")
+                return Finished(False, Message(TEXT.SECTION_WORKER_STOPPED))
             if isinstance(event, Finished):
                 return event
             emit(event)

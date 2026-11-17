@@ -12,7 +12,7 @@ class IdleDownloader:
         self._emit = emit
 
     def run(self, request) -> None:
-        self._emit(Finished(True, "Kész!"))
+        self._emit(Finished(True, "Done!"))
 
     def cancel(self) -> None: ...
 
@@ -67,7 +67,7 @@ def test_enqueue_detects_playlists_only_when_the_ui_does_not_know(api):
     assert got["https://youtu.be/b"].output_dir == Path(api._settings["output_dir"])
     # A minőség a felhasználó mentett választása marad; a videóhoz igazított érték nem írja felül.
     assert api.saved[-1] | {"output_dir": ""} == {
-        "output_dir": "", "mode": "audio", "quality": "best", "compatible": False, "container": "mp4", "audio_format": "opus",
+        "language": "system", "output_dir": "", "mode": "audio", "quality": "best", "compatible": False, "container": "mp4", "audio_format": "opus",
     }
 
 
@@ -84,13 +84,29 @@ def test_enqueue_reports_duplicates_still_in_the_queue(api):
 
 
 def test_enqueue_rejects_empty_input_and_missing_ffmpeg(api):
-    assert api.enqueue({"items": [{"url": "  "}]}) == {"ok": False, "error": "Adj meg egy linket."}
+    assert api.enqueue({"items": [{"url": "  "}]}) == {"ok": False, "error": {"message": "LINK_REQUIRED", "params": {}}}
 
     api._tools = Tools(ffmpeg_dir=None)
     result = api.enqueue({"items": [{"url": "https://youtu.be/a"}]})
 
-    assert not result["ok"] and "ffmpeg" in result["error"]
+    assert not result["ok"] and result["error"]["message"] == "FFMPEG_MISSING"
     assert api._queue.snapshot().items == ()
+    assert api.saved == []
+
+
+def test_language_changes_are_saved_and_returned_on_startup(api):
+    api.save_settings({"language": "en"})
+    assert api.saved[-1]["language"] == "en"
+    assert api.init()["settings"]["language"] == "en"
+    api.save_settings({"language": "unsupported"})
+    assert api.saved[-1]["language"] == "system"
+
+
+@pytest.mark.parametrize("system,expected", [("hu_HU", "hu"), ("en_US", "en"), ("de_DE", "en")])
+def test_init_resolves_automatic_language_without_overwriting_preference(api, monkeypatch, system, expected):
+    monkeypatch.setattr(app.settings_store, "system_locale", lambda: system)
+    assert api.init()["settings"]["language"] == expected
+    assert api._settings["language"] == "system"
     assert api.saved == []
 
 
@@ -187,7 +203,7 @@ def test_install_blocks_pending_downloads_and_unready_updates(api, monkeypatch):
     api._queue.shutdown()
     api._queue = app.DownloadQueue(lambda event: None, lambda emit: BlockingDownloader())
     api.enqueue({"items": [{"url": "https://youtu.be/a"}]})
-    assert "sor végét" in api.install_update()["error"]
+    assert api.install_update()["error"]["message"] == "UPDATE_QUEUE_PENDING"
     api._queue.shutdown()
 
 

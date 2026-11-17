@@ -50,7 +50,7 @@ def test_cancelled_http_download_removes_partial_files(local_video, tmp_path, fi
     downloader = Downloader(emit, Tools(ffmpeg_dir=Path("/ffmpeg")))
     downloader.run(DownloadRequest(local_video.replace("video.mp4", filename), output, Mode.VIDEO))
 
-    assert events[-1] == Finished(False, "Letöltés megszakítva.")
+    assert events[-1] == Finished(False, "Download cancelled.")
     assert list(output.iterdir()) == [existing]
     assert existing.read_bytes() == b"keep"
 
@@ -93,7 +93,7 @@ def test_failed_playlist_removes_only_new_empty_destination(local_video, tmp_pat
 
     assert isinstance(events[-1], Finished) and not events[-1].ok
     if outcome == "cancel":
-        assert "megszakítva" in events[-1].message
+        assert "cancelled" in events[-1].message
     else:
         assert any(isinstance(event, Log) and "test download error" in event.text for event in events)
     assert playlist.exists() is (existing != "absent")
@@ -234,5 +234,5 @@ def test_section_parent_cleans_files_after_worker_is_stopped(monkeypatch, tmp_pa
 
     assert not result.ok
     assert any(isinstance(event, Status) and event.text == "partial file ready" for event in events)
-    assert ("megszakítva" if outcome == "cancel" else "váratlanul") in result.message
+    assert ("cancelled" if outcome == "cancel" else "unexpectedly") in result.message
     assert list(tmp_path.iterdir()) == [existing]

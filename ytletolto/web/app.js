@@ -1,5 +1,6 @@
 "use strict";
 
+import { TEXT, t, setText, setLanguage, detectLanguage } from "./i18n.js";
 const $ = (id) => document.getElementById(id);
 const api = () => window.pywebview.api;
 // Beállítás mentése; a pywebview API még nem biztos, hogy kész (pl. visszaállított űrlapállapotnál).
@@ -40,6 +41,7 @@ const state = {
   activeIndex: null, entryOptions: new Map(), entryInfo: new Map(), entryPending: new Map(),
   singleOptions: null,
   defaults: { mode: "video", quality: "best", container: "mp4", audio_format: "mp3", compatible: false },
+  lastEvents: new Map(),
 };
 
 const radios = (name) => [...document.querySelectorAll(`input[name="${name}"]`)];
@@ -95,13 +97,13 @@ const hasPlaylist = (text) => /[?&]list=/.test(text);
 function log(text, level = "info") {
   const line = document.createElement("div");
   if (level !== "info") line.className = level;
-  line.textContent = text;
+  setText(line, text);
   el.log.appendChild(line);
   el.log.scrollTop = el.log.scrollHeight;
 }
 
 function showNotice(text, error = false) {
-  el.notice.textContent = text;
+  setText(el.notice, text);
   el.notice.classList.toggle("error", error);
   el.notice.hidden = !text;
 }
@@ -145,7 +147,7 @@ async function runProbe() {
   el.skeleton.hidden = true;
 
   if (!res.ok) {
-    el.probeError.textContent = res.error;
+    setText(el.probeError, res.error);
     el.probeError.hidden = false;
     state.probedUrl = "";
     applyMode();
@@ -162,14 +164,14 @@ function showPreview(info, url) {
   el.uploader.textContent = info.uploader;
 
   if (info.kind === "playlist") {
-    el.kind.textContent = info.count ? `Lejátszási lista · ${info.count} videó` : "Lejátszási lista";
+    setText(el.kind, info.count ? TEXT.PLAYLIST_VIDEO_COUNT : TEXT.PLAYLIST, { count: info.count });
     el.badge.hidden = el.duration.hidden = true;
     el.playlistRow.hidden = true; // tiszta lista-link: a lista elemeiből választunk
     showPlaylist(info.entries, url, info.title);
   } else {
     state.singleOptions = { ...state.defaults, start_time: 0, end_time: null };
     restoreOptions(state.singleOptions);
-    el.kind.textContent = "Videó";
+    setText(el.kind, TEXT.VIDEO);
     el.badge.textContent = heightLabel(info.max_height);
     el.badge.hidden = !info.max_height;
     el.duration.textContent = formatDuration(info.duration);
@@ -240,7 +242,7 @@ function playlistRow(entry) {
   select.type = "checkbox";
   select.className = "playlist-select";
   select.checked = true;
-  select.setAttribute("aria-label", `${entry.title} kijelölése letöltésre`);
+  select.setAttribute("aria-label", t(TEXT.SELECT_VIDEO, { title: entry.title }));
 
   const number = document.createElement("span");
   number.className = "playlist-index";
@@ -255,7 +257,7 @@ function playlistRow(entry) {
   const text = document.createElement("button");
   text.type = "button";
   text.className = "playlist-text playlist-open";
-  text.setAttribute("aria-label", `${entry.title} beállításainak szerkesztése`);
+  text.setAttribute("aria-label", t(TEXT.EDIT_VIDEO, { title: entry.title }));
   const title = document.createElement("span");
   title.className = "playlist-title";
   title.textContent = entry.title;
@@ -274,8 +276,8 @@ function playlistRow(entry) {
   const toggle = document.createElement("span");
   toggle.className = "segmented";
   toggle.setAttribute("role", "group");
-  toggle.setAttribute("aria-label", `${entry.index}. elem formátuma`);
-  for (const [mode, label] of [["video", "Videó"], ["audio", "Hang"]]) {
+  toggle.setAttribute("aria-label", t(TEXT.FORMAT_FOR_ITEM_INDEX, { index: entry.index }));
+  for (const [mode, label] of [["video", t(TEXT.VIDEO)], ["audio", t(TEXT.AUDIO)]]) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.mode = mode;
@@ -298,7 +300,7 @@ function setItemMode(li, mode) {
 
 function updatePlaylistSummary() {
   const { video, audio } = modeCounts();
-  el.playlistSummary.textContent = `${video + audio} / ${state.entries.length} elem kijelölve · ${video} videó, ${audio} hang`;
+  setText(el.playlistSummary, TEXT.PLAYLIST_SELECTION_SUMMARY, { selected: video + audio, total: state.entries.length, video, audio });
   applyMode();
 }
 
@@ -348,7 +350,7 @@ async function loadPlaylist() {
   clearPlaylist();
   const token = state.playlistToken;
   el.playlistCard.hidden = el.playlistLoading.hidden = false;
-  el.playlistSummary.textContent = "Lista betöltése…";
+  setText(el.playlistSummary, TEXT.LOADING_PLAYLIST);
   applyMode();
 
   const res = await api().probe(url, true);
@@ -357,9 +359,9 @@ async function loadPlaylist() {
   if (res.ok && res.info.kind === "playlist") state.playlistTitle = res.info.title || "";
   if (!res.ok || res.info.kind !== "playlist" || !res.info.entries.length) {
     // Az elemek nélkül is letölthető a lista, csak egységesen a felül választott módban.
-    el.playlistSummary.textContent = "";
-    const reason = res.ok ? "Ennél a listánál nem lehet elemenként választani" : res.error.replace(/\.+$/, "");
-    el.playlistError.textContent = `${reason}. A teljes lista a választott formátumban töltődik le.`;
+    setText(el.playlistSummary, "");
+    const reason = res.ok ? TEXT.INDIVIDUAL_SELECTION_UNAVAILABLE : res.error;
+    setText(el.playlistError, TEXT.PLAYLIST_SELECTION_UNAVAILABLE, { reason: { message: reason } });
     el.playlistError.hidden = false;
     applyMode();
     return;
@@ -452,10 +454,10 @@ async function selectPlaylistEntry(index) {
     const res = await request;
     if (token !== state.playlistToken) return;
     state.entryInfo.set(entry.id, res.ok && res.info.kind === "video"
-      ? res.info : { ...entry, kind: "video", error: res.error || "A videó adatai nem érhetők el." });
+      ? res.info : { ...entry, kind: "video", error: res.error || TEXT.VIDEO_DETAILS_ARE_UNAVAILABLE });
   } catch {
     if (token !== state.playlistToken) return;
-    state.entryInfo.set(entry.id, { ...entry, kind: "video", error: "A videó adatait nem sikerült betölteni." });
+    state.entryInfo.set(entry.id, { ...entry, kind: "video", error: TEXT.COULD_NOT_LOAD_VIDEO_DETAILS });
   } finally {
     if (token === state.playlistToken) {
       state.entryPending.delete(entry.id);
@@ -476,7 +478,7 @@ function renderEditor() {
   const entry = state.entries.find((e) => e.index === state.activeIndex);
   el.editorLoading.hidden = !perItem || !state.entryPending.has(entry?.id);
   el.editorError.hidden = !perItem || !info?.error;
-  el.editorError.textContent = perItem ? info?.error ?? "" : "";
+  setText(el.editorError, perItem ? info?.error ?? "" : "");
   if (perItem && info) {
     el.editorThumb.style.backgroundImage = cssUrl(info.thumbnail);
     el.editorTitle.textContent = info.title;
@@ -544,25 +546,26 @@ async function renderRangePreview(info) {
     previewRequest = null;
     canvas.hidden = true;
     status.hidden = false;
-    status.textContent = "Preview unavailable";
+    setText(status, TEXT.PREVIEW_UNAVAILABLE);
     return;
   }
   const sheet = board.sheets.find((item) => seconds < item.start + item.duration) ?? board.sheets.at(-1);
   const frame = Math.max(0, Math.min(sheet.frame_count - 1, Math.floor((seconds - sheet.start) * board.fps)));
+  canvas.setAttribute("aria-label", t(TEXT.PREVIEW_NEAR, { time: formatDuration(sheet.start + frame / board.fps) }));
   const key = `${sheet.url}#${frame}`;
   if (previewRequest?.key === key) return;
   const request = { key };
   previewRequest = request;
   canvas.hidden = true;
   status.hidden = false;
-  status.textContent = "Loading preview…";
+  setText(status, TEXT.LOADING_PREVIEW);
   const image = await loadPreviewSheet(sheet.url);
   if (previewRequest !== request || previewBoard !== board) return;
   const x = (frame % board.columns) * board.width;
   const y = Math.floor(frame / board.columns) * board.height;
   if (!image || x + board.width > image.naturalWidth || y + board.height > image.naturalHeight) {
     previewRequest = null;
-    status.textContent = "Preview unavailable";
+    setText(status, TEXT.PREVIEW_UNAVAILABLE);
     return;
   }
   const context = canvas.getContext("2d");
@@ -571,8 +574,6 @@ async function renderRangePreview(info) {
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, x, y, board.width, board.height,
     (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
-  const caption = `Preview near ${formatDuration(sheet.start + frame / board.fps)}`;
-  canvas.setAttribute("aria-label", caption);
   canvas.hidden = false;
   status.hidden = true;
 }
@@ -610,7 +611,7 @@ function renderRange() {
   el.rangeEnd.setAttribute("aria-valuemin", start + 1);
   el.rangeSelection.style.left = `calc(12px + (100% - 24px) * ${start / duration})`;
   el.rangeSelection.style.right = `calc(12px + (100% - 24px) * ${1 - end / duration})`;
-  el.rangeSummary.textContent = `${hasSection() ? "Kijelölt hossz" : "Teljes videó"}: ${formatDuration(end - start)}`;
+  el.rangeSummary.textContent = `${hasSection() ? t(TEXT.SELECTED_DURATION) : t(TEXT.FULL_VIDEO)}: ${formatDuration(end - start)}`;
   el.rangeReset.disabled = !hasSection();
   if (perItemMode()) {
     const label = playlistItemRow(state.activeIndex)?.querySelector(".playlist-range");
@@ -643,27 +644,27 @@ for (const [side, input] of [["start", el.rangeStart], ["end", el.rangeEnd]]) {
   });
 }
 
-let draggedRangeSide = null;
-let draggedRangeOffset = 0;
-el.rangeSlider.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || el.rangeSection.hidden) return;
-  event.preventDefault();
-  const bounds = el.rangeSlider.getBoundingClientRect();
-  const duration = Number(el.rangeEnd.max), width = Math.max(1, bounds.width - 24);
-  const startX = Number(el.rangeStart.value) / duration * width;
-  const endX = Number(el.rangeEnd.value) / duration * width;
-  const nativeThumb = event.target === el.rangeStart || event.target === el.rangeEnd;
-  const x = event.clientX - bounds.left - 12;
-  const value = Math.round(Math.max(0, Math.min(1, x / width)) * duration);
-  draggedRangeSide = Math.abs(x - startX) <= Math.abs(x - endX) ? "start" : "end";
-  // A fogási terület szélét megfogva is maradjon meg az egér és a kör távolsága.
-  draggedRangeOffset = nativeThumb ? x - (draggedRangeSide === "start" ? startX : endX) : 0;
-  el.rangeSlider.setPointerCapture(event.pointerId);
-  (draggedRangeSide === "start" ? el.rangeStart : el.rangeEnd).focus({ preventScroll: true });
-  if (!nativeThumb) changeRange(draggedRangeSide, value);  else showRangePreview(value, draggedRangeSide);
-
-});
-el.rangeSlider.addEventListener("pointermove", (event) => {
+let draggedRangeSide = null;
+let draggedRangeOffset = 0;
+el.rangeSlider.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || el.rangeSection.hidden) return;
+  event.preventDefault();
+  const bounds = el.rangeSlider.getBoundingClientRect();
+  const duration = Number(el.rangeEnd.max), width = Math.max(1, bounds.width - 24);
+  const startX = Number(el.rangeStart.value) / duration * width;
+  const endX = Number(el.rangeEnd.value) / duration * width;
+  const nativeThumb = event.target === el.rangeStart || event.target === el.rangeEnd;
+  const x = event.clientX - bounds.left - 12;
+  const value = Math.round(Math.max(0, Math.min(1, x / width)) * duration);
+  draggedRangeSide = Math.abs(x - startX) <= Math.abs(x - endX) ? "start" : "end";
+  // A fogási terület szélét megfogva is maradjon meg az egér és a kör távolsága.
+  draggedRangeOffset = nativeThumb ? x - (draggedRangeSide === "start" ? startX : endX) : 0;
+  el.rangeSlider.setPointerCapture(event.pointerId);
+  (draggedRangeSide === "start" ? el.rangeStart : el.rangeEnd).focus({ preventScroll: true });
+  if (!nativeThumb) changeRange(draggedRangeSide, value);
+  else showRangePreview(value, draggedRangeSide);
+});
+el.rangeSlider.addEventListener("pointermove", (event) => {
   if (!draggedRangeSide) {
     if (event.pointerType !== "touch") {
       const bounds = el.rangeSlider.getBoundingClientRect();
@@ -673,10 +674,10 @@ el.rangeSlider.addEventListener("pointermove", (event) => {
     return;
   }
 
-  const bounds = el.rangeSlider.getBoundingClientRect();
-  const value = Math.round(Math.max(0, Math.min(1, (event.clientX - bounds.left - 12 - draggedRangeOffset) / Math.max(1, bounds.width - 24))) * Number(el.rangeEnd.max));
-  changeRange(draggedRangeSide, value);
-});
+  const bounds = el.rangeSlider.getBoundingClientRect();
+  const value = Math.round(Math.max(0, Math.min(1, (event.clientX - bounds.left - 12 - draggedRangeOffset) / Math.max(1, bounds.width - 24))) * Number(el.rangeEnd.max));
+  changeRange(draggedRangeSide, value);
+});
 for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) el.rangeSlider.addEventListener(event, () => {
   draggedRangeSide = null;
   hideRangePreview();
@@ -716,13 +717,13 @@ function availableQualities() {
 function qualityChips() {
   const available = availableQualities();
   if (!available) {
-    return [{ value: "best", label: "Legjobb", tier: Infinity }, ...FALLBACK_TIERS.map((tier) => ({ value: String(tier), label: tierLabel(tier), tier }))];
+    return [{ value: "best", label: t(TEXT.BEST), tier: Infinity }, ...FALLBACK_TIERS.map((tier) => ({ value: String(tier), label: tierLabel(tier), tier }))];
   }
-  // A legfelső fokozat maga a "Legjobb": külön chipként ugyanazt jelentené.
+  // A legfelső fokozat maga a TEXT.BEST: külön chipként ugyanazt jelentené.
   const [top, ...rest] = available;
   const shown = top.tier > MIN_TIER ? rest.filter((q) => q.tier >= MIN_TIER) : rest;
   return [
-    { value: "best", label: `Legjobb · ${tierLabel(top.tier, top.fps)}`, size: top.size, tier: top.tier },
+    { value: "best", label: t(TEXT.BEST_QUALITY, { quality: tierLabel(top.tier, top.fps) }), size: top.size, tier: top.tier },
     ...shown.map((q) => ({ value: String(q.tier), label: tierLabel(q.tier, q.fps), size: q.size, tier: q.tier })),
   ];
 }
@@ -734,7 +735,7 @@ function qualityChip({ value, label, size }) {
   if (size) {
     const small = document.createElement("small");
     small.textContent = formatSize(size);
-    small.title = "Becsült fájlméret";
+    small.title = t(TEXT.ESTIMATED_FILE_SIZE);
     text.append(small);
   }
   const chip = document.createElement("label");
@@ -759,7 +760,7 @@ function showBatch(urls) {
   clearPreview();
   el.url.value = "";
   state.batch = urls;
-  el.batchCount.textContent = `${urls.length} link`;
+  setText(el.batchCount, TEXT.LINK_COUNT, { count: urls.length });
   const rows = urls.slice(0, BATCH_PREVIEW).map((url) => {
     const li = document.createElement("li");
     li.textContent = url;
@@ -769,7 +770,7 @@ function showBatch(urls) {
   if (urls.length > BATCH_PREVIEW) {
     const more = document.createElement("li");
     more.className = "more";
-    more.textContent = `és még ${urls.length - BATCH_PREVIEW}…`;
+    setText(more, TEXT.AND_COUNT_MORE, { count: urls.length - BATCH_PREVIEW });
     rows.push(more);
   }
   el.batchList.replaceChildren(...rows);
@@ -824,16 +825,16 @@ el.batchClear.addEventListener("click", () => { clearBatch(); el.url.focus(); })
 // --- Beállítások -------------------------------------------------------------
 
 const CONTAINERS = {
-  mp4: { label: "MP4", hint: "Mindenhol lejátszható: telefonon, tévén, szerkesztőprogramokban is." },
-  mkv: { label: "MKV", hint: "Bármilyen kodek belefér, így a legjobb hangsávot kapod; VLC-vel és a legtöbb lejátszóval megy." },
-  webm: { label: "WebM", hint: "Nyílt formátum (VP9/AV1 + Opus), böngészőkhöz ideális. Borítókép nélkül." },
+  mp4: { label: "MP4", hint: TEXT.MP4_HINT },
+  mkv: { label: "MKV", hint: TEXT.MKV_HINT },
+  webm: { label: "WebM", hint: TEXT.WEBM_HINT },
 };
 
 const AUDIO_FORMATS = {
-  mp3: { label: "MP3", hint: "Mindenhol lejátszható: autóban, régi lejátszón is. 320 kbps, borítóképpel, címmel és előadóval." },
-  m4a: { label: "M4A", hint: "Az eredeti AAC hangsáv átalakítás nélkül, borítóképpel. Apple-eszközökön és telefonon ideális." },
-  opus: { label: "Opus", hint: "A legjobb elérhető minőség átalakítás nélkül, kis fájlban. Régebbi lejátszók nem mindig kezelik." },
-  wav: { label: "WAV", hint: "Tömörítetlen, vágó- és DJ-programokhoz. Nem szól jobban, csak sokkal nagyobb; borítókép nélkül." },
+  mp3: { label: "MP3", hint: TEXT.MP3_HINT },
+  m4a: { label: "M4A", hint: TEXT.M4A_HINT },
+  opus: { label: "Opus", hint: TEXT.OPUS_HINT },
+  wav: { label: "WAV", hint: TEXT.WAV_HINT },
 };
 
 function currentFormat() {
@@ -844,14 +845,14 @@ function currentFormat() {
 
 function updateDownloadLabel() {
   if (perItemMode()) {
-    el.downloadLabel.textContent = `${selectedEntries().length} elem hozzáadása a sorhoz`;
+    el.downloadLabel.textContent = t(TEXT.ADD_ITEMS_TO_QUEUE, { count: selectedEntries().length });
     return;
   }
   const { label } = currentFormat();
   const busy = [...state.items.values()].some((i) => i.state === "queued" || i.state === "running");
-  if (state.batch.length) el.downloadLabel.textContent = `${state.batch.length} link letöltése · ${label}`;
-  else if (busy) el.downloadLabel.textContent = `${label} hozzáadása a sorhoz`;
-  else el.downloadLabel.textContent = `${label} letöltése`;
+  if (state.batch.length) el.downloadLabel.textContent = t(TEXT.DOWNLOAD_LINKS, { count: state.batch.length, format: label });
+  else if (busy) el.downloadLabel.textContent = t(TEXT.ADD_FORMAT_TO_QUEUE, { format: label });
+  else el.downloadLabel.textContent = t(TEXT.DOWNLOAD_FORMAT, { format: label });
 }
 
 function applyMode() {
@@ -863,15 +864,15 @@ function applyMode() {
   el.modeTitle.hidden = el.modeGrid.hidden = false;
   el.videoOptions.hidden = audio;
   el.audioOptions.hidden = !audio;
-  el.videoFormatTitle.textContent = el.audioFormatTitle.textContent = "Fájlformátum";
-  el.containerHint.textContent = container.hint;
-  el.audioFormatHint.textContent = audioFormat.hint;
+  el.videoFormatTitle.textContent = el.audioFormatTitle.textContent = t(TEXT.FILE_FORMAT);
+  el.containerHint.textContent = t(container.hint);
+  el.audioFormatHint.textContent = t(audioFormat.hint);
   el.compatibleRow.hidden = radioValue("container") === "webm"; // H.264 nem fér WebM-be
   renderQualities(); // a fokozatok formátumonként mások (pl. kompatibilis módban legfeljebb 1080p)
   el.download.disabled = loading() || (perItem && counts.video + counts.audio === 0);
   el.download.querySelector("#download-label").textContent = perItem
-    ? `${counts.video + counts.audio} elem letöltése`
-    : `${(audio ? audioFormat : container).label} letöltése`;
+    ? t(TEXT.DOWNLOAD_ITEMS, { count: counts.video + counts.audio })
+    : t(TEXT.DOWNLOAD_FORMAT, { format: (audio ? audioFormat : container).label });
   if (!perItem) updateDownloadLabel();
   renderEditor();
 }
@@ -970,8 +971,8 @@ async function submitToQueue() {
   clearPreview();
   clearBatch();
   if (!res.skipped) showNotice("");
-  else if (res.added) showNotice(`${res.added} link a sorba került, ${res.skipped} már benne volt.`);
-  else showNotice(res.skipped > 1 ? "Ezek a linkek már a sorban vannak." : "Ez a link már a sorban van.");
+  else if (res.added) showNotice({ message: TEXT.QUEUE_ADDED_SUMMARY, params: { added: res.added, skipped: res.skipped } });
+  else showNotice(res.skipped > 1 ? TEXT.LINKS_ALREADY_QUEUED : TEXT.LINK_ALREADY_QUEUED);
   el.url.focus();
 }
 
@@ -993,19 +994,19 @@ function formatLabel(item) {
   } else {
     parts.push(CONTAINERS[item.container]?.label ?? item.container);
     if (item.max_height) parts.push(tierLabel(item.max_height));
-    if (item.compatible && item.container !== "webm") parts.push("kompatibilis");
+    if (item.compatible && item.container !== "webm") parts.push(t(TEXT.COMPATIBLE));
   }
-  if (item.start_time > 0 || item.end_time != null) parts.push(`${formatDuration(item.start_time ?? 0)} – ${item.end_time == null ? "végéig" : formatDuration(item.end_time)}`);
+  if (item.start_time > 0 || item.end_time != null) parts.push(`${formatDuration(item.start_time ?? 0)} – ${item.end_time == null ? t(TEXT.TO_END) : formatDuration(item.end_time)}`);
   return parts.join(" · ");
 }
 
 function stateText(item) {
   switch (item.state) {
-    case "queued": return "Várakozik";
-    case "running": return item.status || "Előkészítés…";
-    case "done": return item.files.length > 1 ? `Kész · ${item.files.length} fájl` : "Kész";
-    case "cancelled": return "Megszakítva";
-    default: return item.message || "Hiba történt.";
+    case "queued": return t(TEXT.QUEUED);
+    case "running": return t(item.status || TEXT.PREPARING);
+    case "done": return item.files.length > 1 ? t(TEXT.DONE_COUNT_FILES, { count: item.files.length }) : t(TEXT.DONE);
+    case "cancelled": return t(TEXT.CANCELLED);
+    default: return t(item.message || TEXT.AN_ERROR_OCCURRED);
   }
 }
 
@@ -1021,7 +1022,7 @@ function button(label, onClick, className = "btn btn-ghost btn-sm") {
 function removeButton(id) {
   const btn = button("", () => { btn.disabled = true; api().remove(id); }, "btn btn-ghost btn-sm btn-icon");
   btn.innerHTML = ICONS.remove;
-  btn.title = "Eltávolítás a sorból";
+  btn.title = t(TEXT.REMOVE_FROM_QUEUE);
   btn.setAttribute("aria-label", btn.title);
   return btn;
 }
@@ -1032,18 +1033,18 @@ function actionsFor(item) {
     case "queued":
       return [removeButton(id)];
     case "running": {
-      const cancel = button("Mégse", () => {
+      const cancel = button(t(TEXT.CANCEL), () => {
         cancel.disabled = true;
-        cancel.textContent = "Megszakítás…";
+        cancel.textContent = t(TEXT.CANCELLING);
         api().cancel(id);
       });
       return [cancel];
     }
     case "done":
       // Lejátszási listánál az első fájlt jelöljük ki, így a mappája nyílik meg.
-      return [...(item.files.length ? [button("Megmutatás", () => api().reveal(item.files[0]))] : []), removeButton(id)];
+      return [...(item.files.length ? [button(t(TEXT.SHOW_IN_FOLDER), () => api().reveal(item.files[0]))] : []), removeButton(id)];
     default:
-      return [button("Újra", () => api().retry(id)), removeButton(id)];
+      return [button(t(TEXT.RETRY), () => api().retry(id)), removeButton(id)];
   }
 }
 
@@ -1081,17 +1082,17 @@ function logTransition(item) {
   const name = item.title || item.url;
   if (item.state === "running") log(`▶ ${name}`);
   else if (item.state === "done") item.files.forEach((f) => log(`✔ ${f}`));
-  else if (item.state === "failed") log(`${name}: ${item.message}`, "error");
-  else if (item.state === "cancelled") log(`${name}: megszakítva`, "warning");
+  else if (item.state === "failed") log({ message: TEXT.NAMED_MESSAGE, params: { name, error: { message: item.message } } }, "error");
+  else if (item.state === "cancelled") log({ message: TEXT.NAME_CANCELLED, params: { name } }, "warning");
 }
 
-function updateRow(row, item) {
+function updateRow(row, item, refresh = false) {
   const title = row.querySelector(".q-title");
-  title.textContent = item.title || (item.playlist ? "Videó adatainak lekérése…" : item.url);
+  title.textContent = item.title || (item.playlist ? t(TEXT.FETCHING_VIDEO_DETAILS) : item.url);
   title.title = item.url;
   const playlist = row.querySelector(".q-playlist");
   playlist.hidden = !item.playlist;
-  playlist.textContent = item.playlist_title ? `Lejátszási lista: ${item.playlist_title}` : "Lejátszási listából";
+  playlist.textContent = item.playlist_title ? t(TEXT.PLAYLIST_TITLE, { title: item.playlist_title }) : t(TEXT.FROM_PLAYLIST);
   playlist.title = playlist.textContent;
   row.querySelector(".q-format").textContent = formatLabel(item);
   const thumb = row.querySelector(".q-thumb");
@@ -1099,7 +1100,20 @@ function updateRow(row, item) {
   thumb.classList.toggle("has-image", Boolean(item.thumbnail));
 
   // A futó elem szövegét és sávját a folyamatesemények frissítik, ezt csak állapotváltáskor írjuk felül.
-  if (row.dataset.state === item.state) return;
+  if (row.dataset.state === item.state) {
+    if (refresh) {
+      setRowStatus(row, stateText(item));
+      const actions = row.querySelector(".q-actions");
+      const buttons = actionsFor(item);
+      buttons.forEach((button, index) => {
+        if (!actions.children[index]?.disabled) return;
+        button.disabled = true;
+        if (item.state === "running") button.textContent = t(TEXT.CANCELLING);
+      });
+      actions.replaceChildren(...buttons);
+    }
+    return;
+  }
   row.dataset.state = item.state;
   row.className = `q-item ${item.state}`;
   row.querySelector(".bar").hidden = item.state !== "running";
@@ -1111,6 +1125,7 @@ function updateRow(row, item) {
 
 function renderQueue(items) {
   state.items = new Map(items.map((i) => [i.id, i]));
+  for (const id of state.lastEvents.keys()) if (state.items.get(id)?.state !== "running") state.lastEvents.delete(id);
   const rows = new Map([...el.queueList.children].map((row) => [Number(row.dataset.id), row]));
   // Helyben rendezzük a sorokat: az újra beszúrt elem újrajátszaná a megjelenési animációt.
   items.forEach((item, index) => {
@@ -1124,8 +1139,8 @@ function renderQueue(items) {
 
   const count = (s) => items.filter((i) => i.state === s).length;
   const parts = [
-    [count("queued"), "várakozik"], [count("done"), "kész"],
-    [count("failed"), "sikertelen"], [count("cancelled"), "megszakítva"],
+    [count("queued"), t(TEXT.QUEUED_SUMMARY)], [count("done"), t(TEXT.DONE_SUMMARY)],
+    [count("failed"), t(TEXT.FAILED)], [count("cancelled"), t(TEXT.CANCELLED_SUMMARY)],
   ].filter(([n]) => n).map(([n, label]) => `${n} ${label}`);
   el.queueCount.textContent = parts.join(" · ");
   el.clearFinished.hidden = !items.some((i) => ["done", "failed", "cancelled"].includes(i.state));
@@ -1148,11 +1163,12 @@ const handlers = {
   progress(e) {
     const row = rowFor(e.id), item = state.items.get(e.id);
     if (!row || item?.state !== "running") return;
-    const what = (e.mode ?? item.mode) === "audio" ? "Hang letöltése" : e.kind === "audio" ? "Hangsáv letöltése" : "Videósáv letöltése";
+    state.lastEvents.set(e.id, e);
+    const what = (e.mode ?? item.mode) === "audio" ? t(TEXT.DOWNLOADING_AUDIO) : e.kind === "audio" ? t(TEXT.DOWNLOADING_AUDIO_TRACK) : t(TEXT.DOWNLOADING_VIDEO_TRACK);
     const parts = [
       e.item ? `${e.item} · ${what}` : what,
       formatSpeed(e.speed),
-      e.eta != null ? `még ${formatDuration(e.eta) || "0:00"}` : "",
+      e.eta != null ? t(TEXT.TIME_REMAINING, { time: formatDuration(e.eta) || "0:00" }) : "",
     ];
     setRowStatus(row, parts.filter(Boolean).join(" · "));
     setBar(row, e.percent);
@@ -1160,7 +1176,8 @@ const handlers = {
   status(e) {
     const row = rowFor(e.id);
     if (!row || state.items.get(e.id)?.state !== "running") return;
-    setRowStatus(row, e.text);
+    state.lastEvents.set(e.id, e);
+    setRowStatus(row, t(e.text));
     setBar(row, null);
   },
   log(e) { log(e.text, e.level); },
@@ -1172,13 +1189,13 @@ let updateState = null;
 let updateRequest = false;
 const updateDialog = $("updates-dialog");
 
-function renderUpdate(update) {
+function renderUpdate(update, refresh = false) {
   updateState = update;
   const busy = ["checking", "downloading", "installing"].includes(update.status);
   const pending = [...state.items.values()].some((item) => ["queued", "running"].includes(item.state));
   $("app-version").textContent = `v${update.current_version}`;
-  $("update-current").textContent = `Telepítve: v${update.current_version}`;
-  $("update-latest").textContent = `${update.available ? "Elérhető" : "Legutóbbi kiadás"}: v${update.version}`;
+  $("update-current").textContent = t(TEXT.INSTALLED_V_VERSION, { version: update.current_version });
+  $("update-latest").textContent = `${update.available ? t(TEXT.AVAILABLE) : t(TEXT.LATEST_RELEASE)}: v${update.version}`;
   $("update-latest").hidden = !update.version;
   $("update-banner").hidden = !update.available;
   $("update-banner-title").textContent = `Media Minds Downloader · v${update.version}`;
@@ -1189,31 +1206,35 @@ function renderUpdate(update) {
   $("update-install").disabled = pending || update.status === "installing";
   $("update-progress").hidden = update.status !== "downloading";
   $("update-progress").value = update.progress ?? 0;
-  $("update-error").hidden = !update.error;
-  $("update-error").textContent = update.error || "";
+  if (!refresh) {
+    $("update-error").hidden = !update.error;
+    setText($("update-error"), update.error || "");
+  }
   const messages = {
-    idle: "Induláskor automatikusan ellenőrizzük az új kiadásokat.",
-    checking: "Frissítések keresése…",
-    current: "A legfrissebb verziót használod.",
-    available: "Az új verzió készen áll a letöltésre. A beállításaid megmaradnak.",
-    downloading: `Frissítés letöltése és ellenőrzése… ${update.progress ?? 0}%`,
-    ready: pending ? "A frissítés letöltve. Az újraindításhoz várd meg a letöltési sor végét." : "A frissítés letöltve és ellenőrizve. Az alkalmazás újraindul a telepítéshez.",
-    installing: "Frissítés telepítése, újraindítás…",
-    error: "Az ellenőrzés vagy a letöltés újrapróbálható.",
+    idle: t(TEXT.UPDATE_AUTO_CHECK_HINT),
+    checking: t(TEXT.CHECKING_FOR_UPDATES),
+    current: t(TEXT.UPDATE_CURRENT),
+    available: t(TEXT.UPDATE_AVAILABLE_HINT),
+    downloading: t(TEXT.UPDATE_DOWNLOAD_PROGRESS, { percent: update.progress ?? 0 }),
+    ready: pending ? t(TEXT.UPDATE_WAIT_FOR_QUEUE) : t(TEXT.UPDATE_READY),
+    installing: t(TEXT.INSTALLING_UPDATE_AND_RESTARTING),
+    error: t(TEXT.UPDATE_RETRY_HINT),
   };
   $("update-status").textContent = messages[update.status] || "";
-  if (!update.supported) $("update-status").textContent += " Az alkalmazáson belüli telepítés a csomagolt Windows-verziókban érhető el.";
+  if (!update.supported) $("update-status").textContent += " " + t(TEXT.UPDATE_PACKAGED_ONLY);
   // Release text is untrusted; render as text, never HTML.
-  $("release-notes").textContent = update.notes || "A kiadási megjegyzések az ellenőrzés után jelennek meg.";
+  $("release-notes").textContent = update.notes || t(update.version
+    ? TEXT.RELEASE_NOTES_UNAVAILABLE
+    : TEXT.RELEASE_NOTES_PLACEHOLDER);
   const date = new Date(update.published_at);
-  $("release-date").textContent = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("hu-HU", {year: "numeric", month: "long", day: "numeric"});
+  $("release-date").textContent = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(window.i18n.locale, {year: "numeric", month: "long", day: "numeric"});
 }
 
 async function requestUpdate(method) {
   if (updateRequest) return;
   updateRequest = true;
   try { renderUpdate(await api()[method]()); }
-  catch { $("update-error").textContent = "A frissítési művelet nem sikerült. Próbáld újra."; $("update-error").hidden = false; }
+  catch { setText($("update-error"), TEXT.UPDATE_OPERATION_FAILED); $("update-error").hidden = false; }
   finally { updateRequest = false; }
 }
 
@@ -1230,8 +1251,8 @@ $("update-install").addEventListener("click", async () => {
   $("update-install").disabled = true;
   try {
     const result = await api().install_update();
-    if (!result.ok) { $("update-error").textContent = result.error; $("update-error").hidden = false; }
-  } catch { $("update-error").textContent = "Az újraindítás nem sikerült. Próbáld újra."; $("update-error").hidden = false; }
+    if (!result.ok) { setText($("update-error"), result.error); $("update-error").hidden = false; }
+  } catch { setText($("update-error"), TEXT.RESTART_FAILED); $("update-error").hidden = false; }
   finally { if (updateState) $("update-install").disabled = updateState.status === "installing" || [...state.items.values()].some((item) => ["queued", "running"].includes(item.state)); }
 });
 
@@ -1242,34 +1263,117 @@ window.app = {
 
 // --- Indulás -----------------------------------------------------------------
 
-renderQualities(); // amíg a mentett beállítások meg nem érkeznek
-
-window.addEventListener("pywebviewready", async () => {
-  const { settings, ffmpeg, js_runtime, queue, update } = await api().init();
-  for (const key of Object.keys(state.defaults)) state.defaults[key] = settings[key] ?? state.defaults[key];
-  setRadio("mode", settings.mode);
-  state.quality = settings.quality;
-  setRadio("container", CONTAINERS[settings.container] ? settings.container : "mp4");
-  setRadio("audio_format", AUDIO_FORMATS[settings.audio_format] ? settings.audio_format : "mp3");
-  el.compatible.checked = settings.compatible;
-  showFolder(settings.output_dir);
+function changeLanguage(value) {
+  $("language").value = window.i18n.setLanguage(value);
+  $("language-flag").src = `flags/${window.i18n.language}.svg`;
+  $("language-code").textContent = window.i18n.language.toUpperCase();
+  document.querySelectorAll("[data-language]").forEach((option) => {
+    option.setAttribute("aria-checked", String(option.dataset.language === window.i18n.language));
+  });
   applyMode();
-  handlers.queue(queue);
-
-  if (!ffmpeg) {
-    el.toolsWarning.textContent = "Az ffmpeg nem található, a letöltés nem fog működni. Telepítsd, vagy használd a csomagolt programot.";
-    el.toolsWarning.hidden = false;
-  } else if (!js_runtime) {
-    el.toolsWarning.textContent = "Nincs JavaScript futtatókörnyezet (Deno): a YouTube csak korlátozottan működhet.";
-    el.toolsWarning.hidden = false;
+  for (const entry of state.entries) {
+    const row = playlistItemRow(entry.index);
+    if (!row) continue;
+    row.querySelector(".playlist-select").setAttribute("aria-label", t(TEXT.SELECT_VIDEO, { title: entry.title }));
+    row.querySelector(".playlist-open").setAttribute("aria-label", t(TEXT.EDIT_VIDEO, { title: entry.title }));
+    row.querySelector(".segmented").setAttribute("aria-label", t(TEXT.FORMAT_FOR_ITEM_INDEX, { index: entry.index }));
+    row.querySelectorAll("button[data-mode]").forEach((button) => { button.textContent = t(button.dataset.mode === "video" ? TEXT.VIDEO : TEXT.AUDIO); });
   }
-  el.url.focus();
-  if (update) {
-    renderUpdate(update);
-    $("updates-open").disabled = false;
-    requestUpdate("check_update");
-    setInterval(() => {
-      if (!["ready", "installing", "downloading"].includes(updateState?.status)) requestUpdate("check_update");
-    }, 60 * 60 * 1000);
+  if (state.entries.length) updatePlaylistSummary();
+  for (const item of state.items.values()) updateRow(rowFor(item.id), item, true);
+  for (const event of state.lastEvents.values()) handlers[event.type](event);
+  renderQueue([...state.items.values()]);
+  if (updateState) renderUpdate(updateState, true);
+}
+
+const languagePicker = $("language-picker");
+const languageOptions = [...$("language-menu").querySelectorAll("[data-language]")];
+function closeLanguageMenu(restoreFocus = false) {
+  $("language-menu").hidden = true;
+  $("language").setAttribute("aria-expanded", "false");
+  if (restoreFocus) $("language").focus();
+}
+function openLanguageMenu() {
+  $("language-menu").hidden = false;
+  $("language").setAttribute("aria-expanded", "true");
+  languageOptions.find((option) => option.dataset.language === window.i18n.language).focus();
+}
+$("language").addEventListener("click", () => {
+  if ($("language-menu").hidden) openLanguageMenu();
+  else closeLanguageMenu();
+});
+languageOptions.forEach((option) => option.addEventListener("click", () => {
+  changeLanguage(option.dataset.language);
+  closeLanguageMenu(true);
+  saveSettings({ language: window.i18n.language });
+}));
+languagePicker.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeLanguageMenu(true);
+    event.preventDefault();
+  } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    if ($("language-menu").hidden) {
+      openLanguageMenu();
+      if (event.key === "End") languageOptions.at(-1).focus();
+      else if (event.key === "Home") languageOptions[0].focus();
+      return;
+    }
+    const current = languageOptions.indexOf(document.activeElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? languageOptions.length - 1
+      : (current + (event.key === "ArrowDown" ? 1 : -1) + languageOptions.length) % languageOptions.length;
+    languageOptions[next].focus();
   }
 });
+document.addEventListener("click", (event) => {
+  if (!languagePicker.contains(event.target)) closeLanguageMenu();
+});
+languagePicker.addEventListener("focusout", (event) => {
+  if (!languagePicker.contains(event.relatedTarget)) closeLanguageMenu();
+});
+
+setLanguage(detectLanguage(navigator.language));
+renderQualities(); // amíg a mentett beállítások meg nem érkeznek
+
+let initialized = false;
+async function initialize() {
+  if (initialized || typeof window.pywebview?.api?.init !== "function") return;
+  initialized = true;
+  try {
+    const { settings, ffmpeg, js_runtime, queue, update } = await api().init();
+    changeLanguage(settings.language);
+    $("language").disabled = false;
+    for (const key of Object.keys(state.defaults)) state.defaults[key] = settings[key] ?? state.defaults[key];
+    setRadio("mode", settings.mode);
+    state.quality = settings.quality;
+    setRadio("container", CONTAINERS[settings.container] ? settings.container : "mp4");
+    setRadio("audio_format", AUDIO_FORMATS[settings.audio_format] ? settings.audio_format : "mp3");
+    el.compatible.checked = settings.compatible;
+    showFolder(settings.output_dir);
+    applyMode();
+    handlers.queue(queue);
+
+    if (!ffmpeg) {
+      setText(el.toolsWarning, TEXT.FFMPEG_WARNING);
+      el.toolsWarning.hidden = false;
+    } else if (!js_runtime) {
+      setText(el.toolsWarning, TEXT.JS_RUNTIME_WARNING);
+      el.toolsWarning.hidden = false;
+    }
+    el.url.focus();
+    if (update) {
+      renderUpdate(update);
+      $("updates-open").disabled = false;
+      requestUpdate("check_update");
+      setInterval(() => {
+        if (!["ready", "installing", "downloading"].includes(updateState?.status)) requestUpdate("check_update");
+      }, 60 * 60 * 1000);
+    }
+  } catch (error) {
+    initialized = false;
+    console.error("Failed to initialize the application:", error);
+  }
+}
+window.addEventListener("pywebviewready", initialize);
+// The native bridge may become ready while the text catalogs are loading.
+if (typeof window.pywebview?.api?.init === "function") initialize();

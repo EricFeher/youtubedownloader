@@ -40,6 +40,8 @@ No server required: a single application running on your computer, with the look
   The slider is unavailable for live streams and videos with an unknown duration.
 - Progress indicators show download speed and estimated time remaining, with cancellation support.
 - Remembers the output folder and your most recently selected settings.
+- **Hungarian and English interface**: switch instantly using the **Language** selector below the header.
+  The application remembers your choice. Switching languages preserves the download queue, playlist selections, and video settings.
 - **Application updates**: checks GitHub for the latest stable release at startup and every hour.
   A green notification appears when a new version is available. Use the updates button in the footer to check
   manually and read release notes inside the application.
@@ -80,6 +82,20 @@ python -m venv .venv
 On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python` in the commands above.
 
 On macOS: `brew install ffmpeg deno`.
+
+### Translations
+
+The shared text catalogs are `ytletolto/web/locales/en.json` and `hu.json`.
+English is the source language and fallback for missing translations; keys are independent of their wording.
+In JavaScript, use `t(TEXT.PASTE)` or `setText(node, TEXT.DOWNLOAD_ITEMS, {count: 2})`.
+In HTML, use `data-i18n="PASTE"`, or `data-i18n-aria-label="LANGUAGE"` for attributes.
+Python uses the same keys through `ytletolto.i18n.TEXT`, for example
+`Message(TEXT.UNEXPECTED_ERROR, error=str(exc))`. The UI receives the key and parameters,
+so status messages can be translated again while downloads are running. Add new text to both catalogs;
+English plural forms can use `one` and `other`.
+On first launch, the system display language is used; unsupported languages fall back to English.
+The `language: "system"` setting follows the system, while explicit `hu` and `en` choices are remembered.
+Video titles, filenames, external technical logs, and publisher-written release notes retain their source language.
 
 ## Building an executable
 

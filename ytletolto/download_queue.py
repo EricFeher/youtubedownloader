@@ -13,6 +13,7 @@ from typing import Callable, Protocol
 from urllib.parse import parse_qs, urlparse
 
 from .downloader import AUDIO_FORMATS, VIDEO_CONTAINERS, DownloadRequest, Event, Finished, Mode, Progress, Status, Thumbnail
+from .i18n import TEXT, Message
 
 
 class ItemState(Enum):
@@ -238,7 +239,7 @@ class DownloadQueue:
                 self._cancel_requested = False
                 thread.start()
             except Exception as e:  # noqa: BLE001 - ami el sem indul, legyen sikertelen, és jöhet a következő
-                item.state, item.message = ItemState.FAILED, f"Nem sikerült elindítani: {e}"
+                item.state, item.message = ItemState.FAILED, Message(TEXT.DOWNLOAD_START_FAILED, error=str(e))
                 self._active = None
 
     def _run(self, item: QueueItem, runner: Runner) -> None:
@@ -246,9 +247,9 @@ class DownloadQueue:
             runner.run(item.request)
         except Exception as e:  # noqa: BLE001 - egy hibás elem ne állítsa le a sort
             with self._lock:
-                self._finish_locked(item, Finished(False, f"Váratlan hiba: {e}"))
+                self._finish_locked(item, Finished(False, Message(TEXT.UNEXPECTED_ERROR, error=str(e))))
         with self._lock:
-            self._finish_locked(item, Finished(False, "A letöltés eredmény nélkül ért véget."))
+            self._finish_locked(item, Finished(False, Message(TEXT.DOWNLOAD_NO_RESULT)))
             self._active = None
             self._unannounced += 1
             self._start_next_locked()
@@ -378,7 +379,7 @@ def build_requests(url: str, options: dict, output_dir: Path, playlist: bool, se
         seen.add(video_id)
         overrides = item.get("options", {})
         if not isinstance(overrides, dict):
-            raise ValueError("Érvénytelen videóbeállítások.")
+            raise ValueError(Message(TEXT.INVALID_VIDEO_SETTINGS))
         request = build_request(url, {**options, **overrides}, output_dir, True)
         groups.setdefault(request, []).append(video_id)
     return [dataclasses.replace(request, playlist_ids=tuple(ids)) for request, ids in groups.items()]

@@ -205,6 +205,50 @@ def test_late_thumbnail_cannot_replace_new_position_or_playlist_item(page):
     expect(page.locator("#range-end")).to_have_value("240")
 
 
+@pytest.mark.parametrize("failure", ["network", "timeout"])
+@pytest.mark.parametrize("retry_seconds", [12, 24])
+def test_failed_thumbnail_can_retry_same_sheet(page, failure, retry_seconds):
+    requested = []
+    pending = []
+
+    def image(route):
+        requested.append(route.request.url)
+        if len(requested) == 1:
+            if failure == "network":
+                route.abort("internetdisconnected")
+            else:
+                pending.append(route)
+        else:
+            route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+
+    page.route("**/storyboards/*", image)
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    if failure == "timeout":
+        page.clock.install()
+    set_range(page, "start", 12)
+    if failure == "timeout":
+        expect(page.locator("#range-preview-status")).to_have_text("Loading preview…")
+        page.clock.fast_forward(10001)
+    expect(page.locator("#range-preview-status")).to_have_text("Preview unavailable")
+    expect(page.locator("#range-preview-frame")).to_be_hidden()
+    for route in pending:
+        route.abort("timedout")
+
+    set_range(page, "start", retry_seconds)
+    expect(page.locator("#range-preview-frame")).to_be_visible()
+    expect(page.locator("#range-preview-status")).to_be_hidden()
+    expect(page.locator("#range-preview-frame")).to_have_attribute(
+        "aria-label", f"Preview near 0:{retry_seconds}")
+    assert frame_pixel(page) == ([0, 255, 0, 255] if retry_seconds == 12 else [0, 0, 255, 255])
+    assert len(requested) == 2
+    set_range(page, "start", 36)
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:36")
+    assert frame_pixel(page) == [255, 255, 0, 255]
+    assert len(requested) == 2
+
+
 def test_failed_thumbnail_does_not_block_clip_download(page):
     page.route("**/storyboards/*", lambda route: route.fulfill(status=404, body="Missing"))
     add_storyboard(page)

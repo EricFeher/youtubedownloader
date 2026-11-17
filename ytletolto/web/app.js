@@ -500,6 +500,9 @@ function loadPreviewSheet(url) {
       const timeout = setTimeout(() => { image.onload = image.onerror = null; resolve(null); }, 10000);
       image.onload = () => { clearTimeout(timeout); resolve(image); };
       image.onerror = () => { clearTimeout(timeout); resolve(null); };
+    }).then((image) => {
+      if (!image && previewImages.get(url) === loaded) previewImages.delete(url);
+      return image;
     });
     previewImages.set(url, loaded);
     image.src = url;
@@ -558,6 +561,7 @@ async function renderRangePreview(info) {
   const x = (frame % board.columns) * board.width;
   const y = Math.floor(frame / board.columns) * board.height;
   if (!image || x + board.width > image.naturalWidth || y + board.height > image.naturalHeight) {
+    previewRequest = null;
     status.textContent = "Preview unavailable";
     return;
   }

@@ -27,6 +27,8 @@ const el = {
   rangeSection: $("range-section"), rangeSlider: $("range-slider"), rangeSelection: $("range-selection"),
   rangeStart: $("range-start"), rangeEnd: $("range-end"), rangeStartValue: $("range-start-value"), rangeEndValue: $("range-end-value"),
   rangeDuration: $("range-duration"), rangeSummary: $("range-summary"), rangeReset: $("range-reset"),
+  rangePreview: $("range-preview"), rangePreviewFrame: $("range-preview-frame"),
+  rangePreviewStatus: $("range-preview-status"), rangePreviewTime: $("range-preview-time"),
 };
 
 const state = {
@@ -483,6 +485,94 @@ function renderEditor() {
   renderRange();
 }
 
+// Cache only a few sprite sheets for the active video. Late image loads must not
+// paint a frame from an old position or a previously selected playlist item.
+let previewBoard = null;
+const previewImages = new Map();
+let previewRequest = null;
+let previewTarget = null;
+let previewInfo = null;
+
+function loadPreviewSheet(url) {
+  if (!previewImages.has(url)) {
+    const image = new Image();
+    const loaded = new Promise((resolve) => {
+      const timeout = setTimeout(() => { image.onload = image.onerror = null; resolve(null); }, 10000);
+      image.onload = () => { clearTimeout(timeout); resolve(image); };
+      image.onerror = () => { clearTimeout(timeout); resolve(null); };
+    });
+    previewImages.set(url, loaded);
+    image.src = url;
+    if (previewImages.size > 6) previewImages.delete(previewImages.keys().next().value);
+  }
+  return previewImages.get(url);
+}
+
+function hideRangePreview() {
+  previewTarget = previewRequest = null;
+  el.rangePreview.hidden = true;
+}
+
+function showRangePreview(seconds, side = null) {
+  previewTarget = { seconds, side };
+  renderRangePreview(editorInfo());
+}
+
+async function renderRangePreview(info) {
+  const board = info?.storyboard ?? null;
+  if (info !== previewInfo || board !== previewBoard) {
+    previewInfo = info;
+    previewBoard = board;
+    previewImages.clear();
+    hideRangePreview();
+  }
+  if (!previewTarget || el.rangeSection.hidden) return;
+  const seconds = previewTarget.side === "start" ? Number(el.rangeStart.value)
+    : previewTarget.side === "end" ? Number(el.rangeEnd.value) : previewTarget.seconds;
+  const canvas = el.rangePreviewFrame, status = el.rangePreviewStatus;
+  el.rangePreview.hidden = false;
+  el.rangePreviewTime.textContent = formatDuration(seconds);
+  const sliderWidth = el.rangeSlider.clientWidth, bubbleWidth = el.rangePreview.offsetWidth;
+  const anchor = 12 + (sliderWidth - 24) * seconds / Number(el.rangeEnd.max);
+  const left = Math.max(0, Math.min(sliderWidth - bubbleWidth, anchor - bubbleWidth / 2));
+  el.rangePreview.style.left = `${left}px`;
+  el.rangePreview.style.setProperty("--preview-anchor", `${anchor - left}px`);
+  if (!board?.sheets?.length) {
+    previewRequest = null;
+    canvas.hidden = true;
+    status.hidden = false;
+    status.textContent = "Preview unavailable";
+    return;
+  }
+  const sheet = board.sheets.find((item) => seconds < item.start + item.duration) ?? board.sheets.at(-1);
+  const frame = Math.max(0, Math.min(sheet.frame_count - 1, Math.floor((seconds - sheet.start) * board.fps)));
+  const key = `${sheet.url}#${frame}`;
+  if (previewRequest?.key === key) return;
+  const request = { key };
+  previewRequest = request;
+  canvas.hidden = true;
+  status.hidden = false;
+  status.textContent = "Loading preview…";
+  const image = await loadPreviewSheet(sheet.url);
+  if (previewRequest !== request || previewBoard !== board) return;
+  const x = (frame % board.columns) * board.width;
+  const y = Math.floor(frame / board.columns) * board.height;
+  if (!image || x + board.width > image.naturalWidth || y + board.height > image.naturalHeight) {
+    status.textContent = "Preview unavailable";
+    return;
+  }
+  const context = canvas.getContext("2d");
+  const scale = Math.min(canvas.width / board.width, canvas.height / board.height);
+  const width = board.width * scale, height = board.height * scale;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, x, y, board.width, board.height,
+    (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+  const caption = `Preview near ${formatDuration(sheet.start + frame / board.fps)}`;
+  canvas.setAttribute("aria-label", caption);
+  canvas.hidden = false;
+  status.hidden = true;
+}
+
 function renderRange() {
   const info = editorInfo(), options = editorOptions();
   const duration = Math.floor(info?.duration ?? 0);
@@ -494,6 +584,7 @@ function renderRange() {
   }
   el.rangeSection.hidden = !options || duration < 1 || Boolean(info?.is_live);
   if (el.rangeSection.hidden) {
+    renderRangePreview(null);
     el.quality.classList.remove("has-section");
     return;
   }
@@ -505,6 +596,7 @@ function renderRange() {
   el.rangeStart.max = el.rangeEnd.max = duration;
   el.rangeStart.value = start;
   el.rangeEnd.value = end;
+  renderRangePreview(info);
   el.rangeStartValue.textContent = formatDuration(start);
   el.rangeEndValue.textContent = formatDuration(end);
   el.rangeDuration.textContent = formatDuration(duration);
@@ -532,9 +624,12 @@ function changeRange(side, value) {
   if (side === "start") options.start_time = Math.max(0, Math.min(value, Number(el.rangeEnd.value) - 1));
   else options.end_time = Math.min(duration, Math.max(value, Number(el.rangeStart.value) + 1));
   renderRange();
+  showRangePreview(value, side);
 }
 
 for (const [side, input] of [["start", el.rangeStart], ["end", el.rangeEnd]]) {
+  input.addEventListener("focus", () => showRangePreview(Number(input.value), side));
+  input.addEventListener("blur", hideRangePreview);
   input.addEventListener("input", () => changeRange(side, Number(input.value)));
   input.addEventListener("keydown", (event) => {
     if (event.shiftKey && ["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp"].includes(event.key)) {
@@ -561,20 +656,36 @@ el.rangeSlider.addEventListener("pointerdown", (event) => {
   draggedRangeOffset = nativeThumb ? x - (draggedRangeSide === "start" ? startX : endX) : 0;
   el.rangeSlider.setPointerCapture(event.pointerId);
   (draggedRangeSide === "start" ? el.rangeStart : el.rangeEnd).focus({ preventScroll: true });
-  if (!nativeThumb) changeRange(draggedRangeSide, value);
+  if (!nativeThumb) changeRange(draggedRangeSide, value);  else showRangePreview(value, draggedRangeSide);
+
 });
 el.rangeSlider.addEventListener("pointermove", (event) => {
-  if (!draggedRangeSide) return;
+  if (!draggedRangeSide) {
+    if (event.pointerType !== "touch") {
+      const bounds = el.rangeSlider.getBoundingClientRect();
+      const fraction = Math.max(0, Math.min(1, (event.clientX - bounds.left - 12) / Math.max(1, bounds.width - 24)));
+      showRangePreview(Math.round(fraction * Number(el.rangeEnd.max)));
+    }
+    return;
+  }
+
   const bounds = el.rangeSlider.getBoundingClientRect();
   const value = Math.round(Math.max(0, Math.min(1, (event.clientX - bounds.left - 12 - draggedRangeOffset) / Math.max(1, bounds.width - 24))) * Number(el.rangeEnd.max));
   changeRange(draggedRangeSide, value);
 });
-for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) el.rangeSlider.addEventListener(event, () => { draggedRangeSide = null; });
+for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) el.rangeSlider.addEventListener(event, () => {
+  draggedRangeSide = null;
+  hideRangePreview();
+});
+el.rangeSlider.addEventListener("pointerleave", () => { if (!draggedRangeSide) hideRangePreview(); });
+window.addEventListener("resize", () => renderRangePreview(editorInfo()));
+
 el.rangeReset.addEventListener("click", () => {
   const options = editorOptions();
   if (!options) return;
   options.start_time = 0;
   options.end_time = null;
+  hideRangePreview();
   renderRange();
 });
 

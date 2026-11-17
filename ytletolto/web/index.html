@@ -107,6 +107,13 @@
           <label for="range-end">Vége <output id="range-end-value">0:00</output></label>
         </div>
         <div class="range-slider" id="range-slider">
+          <figure class="range-preview" id="range-preview" hidden>
+            <div class="range-preview-image">
+              <canvas id="range-preview-frame" width="320" height="180" role="img" aria-label="Timeline preview" hidden></canvas>
+              <span id="range-preview-status">Loading preview…</span>
+            </div>
+            <figcaption id="range-preview-time"></figcaption>
+          </figure>
           <div class="range-track"></div>
           <div class="range-selection" id="range-selection"></div>
           <input type="range" min="0" max="1" step="1" value="0" id="range-start" aria-label="Részlet kezdete">

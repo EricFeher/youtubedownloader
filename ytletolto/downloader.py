@@ -355,6 +355,54 @@ class PlaylistEntry:
 
 
 @dataclass(frozen=True)
+class StoryboardSheet:
+    url: str
+    start: float
+    duration: float
+    frame_count: int
+
+
+@dataclass(frozen=True)
+class Storyboard:
+    width: int
+    height: int
+    columns: int
+    rows: int
+    fps: float
+    sheets: tuple[StoryboardSheet, ...]
+
+
+def storyboard_preview(info: dict) -> Storyboard | None:
+    """Keep one image grid track from yt-dlp's metadata; never fetch video media."""
+    candidates = []
+    for fmt in info.get("formats") or []:
+        if fmt.get("protocol") != "mhtml":
+            continue
+        dimensions = [fmt.get(key) for key in ("width", "height", "columns", "rows")]
+        fps = fmt.get("fps")
+        if any(type(value) is not int or value <= 0 for value in dimensions):
+            continue
+        if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+            continue
+        width, height, columns, rows = dimensions
+        sheets = []
+        start = 0.0
+        for fragment in fmt.get("fragments") or []:
+            url, duration = fragment.get("url"), fragment.get("duration")
+            if (not isinstance(url, str) or not url.startswith(("https://", "http://"))
+                    or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0):
+                break
+            # The last sheet can be partially filled; avoid its blank cells at the end.
+            count = min(columns * rows, max(1, math.ceil(duration * fps - 1e-7)))
+            sheets.append(StoryboardSheet(url, start, duration, count))
+            start += duration
+        else:
+            if sheets:
+                candidates.append(Storyboard(width, height, columns, rows, fps, tuple(sheets)))
+    return max(candidates, key=lambda board: board.width * board.height, default=None)
+
+
+@dataclass(frozen=True)
 class VideoInfo:
     kind: str  # "video" | "playlist"
     title: str
@@ -367,6 +415,7 @@ class VideoInfo:
     # quality_key() szerint; csökkenő sorrendben, az első a "Legjobb". Üres, ha nem sikerült kiszámolni.
     qualities: dict[str, list[Quality]] = field(default_factory=dict)
     is_live: bool = False
+    storyboard: Storyboard | None = None
 
 
 def summarize(info: dict) -> VideoInfo:
@@ -398,6 +447,7 @@ def summarize(info: dict) -> VideoInfo:
         duration=int(info["duration"]) if info.get("duration") else None,
         max_height=max(tiers) if tiers else None,
         is_live=bool(info.get("is_live")),
+        storyboard=storyboard_preview(info),
     )
 
 

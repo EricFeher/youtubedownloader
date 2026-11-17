@@ -26,6 +26,10 @@ No server required: a single application running on your computer, with the look
 - **Clip downloads**: select the start and end using a slider with two handles; the green bar shows the portion
   to download. Arrow keys move a handle by one second, or by ten seconds with Shift held down.
   The full-video button resets the selection. Works for both video and audio-only downloads.
+  A floating thumbnail appears above the timeline while hovering, dragging either handle, or using the keyboard,
+  including in the playlist editor. The preview follows the pointer or active handle and hides when you finish.
+  These use YouTube's sampled timeline images and show an approximate preview time, not an exact frame.
+  If timeline images are unavailable or cannot load, time selection still works normally.
 - **Playlist editing**: click a video in the playlist to show its details, quality, format, and time range in
   the shared editor below the list. Settings are preserved for each video. Checkboxes independently control
   which items are included in the download. Items with identical settings are grouped into a single download

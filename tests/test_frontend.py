@@ -85,6 +85,184 @@ def set_range(page, side, seconds):
     page.locator(f"#range-{side}").evaluate("(input,value)=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}", seconds)
 
 
+STORYBOARD_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180">
+<path fill="red" d="M0 0h160v90H0z"/><path fill="lime" d="M160 0h160v90H160z"/>
+<path fill="blue" d="M0 90h160v90H0z"/><path fill="yellow" d="M160 90h160v90H160z"/></svg>'''
+
+
+def add_storyboard(page):
+    page.evaluate("""() => {
+      window.videoData.one.storyboard = {width:160,height:90,columns:2,rows:2,fps:1/12,
+        sheets:[{url:'/storyboards/0.svg',start:0,duration:48,frame_count:4},
+                {url:'/storyboards/1.svg',start:48,duration:48,frame_count:4},
+                {url:'/storyboards/2.svg',start:96,duration:24,frame_count:2}]};
+    }""")
+
+
+def frame_pixel(page):
+    return page.locator("#range-preview-frame").evaluate(
+        "canvas => [...canvas.getContext('2d').getImageData(160,60,1,1).data]")
+
+
+def test_timeline_thumbnails_follow_handles_keyboard_and_final_partial_sheet(page):
+    requested = []
+
+    def image(route):
+        requested.append(route.request.url)
+        route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+
+    page.route("**/storyboards/*", image)
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    page.locator("#range-end").focus()
+    expect(page.locator("#range-preview-frame")).to_be_visible()
+    expect(page.locator("#range-preview-time")).to_have_text("2:00")
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 1:48")
+    assert frame_pixel(page) == [0, 255, 0, 255]  # Last valid cell, not a blank one.
+    set_range(page, "start", 12)
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:12")
+    assert frame_pixel(page) == [0, 255, 0, 255]
+    page.locator("#range-start").press("Shift+ArrowRight")
+    page.locator("#range-start").press("ArrowRight")
+    page.locator("#range-start").press("ArrowRight")
+    expect(page.locator("#range-preview-time")).to_have_text("0:24")
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:24")
+    assert frame_pixel(page) == [0, 0, 255, 255]
+    bounds = page.locator("#range-slider").bounding_box()
+    x, y, width = bounds["x"] + 12, bounds["y"] + 24, bounds["width"] - 24
+    page.mouse.move(x + width, y)
+    page.mouse.down()
+    page.mouse.move(x + width * 0.4, y, steps=5)
+    expect(page.locator("#range-preview-time")).to_have_text("0:48")
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:48")
+    assert frame_pixel(page) == [255, 0, 0, 255]
+    page.mouse.up()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    page.locator("#range-reset").click()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    expect(page.locator("#range-start")).to_have_value("0")
+    expect(page.locator("#range-end")).to_have_value("120")
+    assert len(requested) == 3
+
+
+@pytest.mark.parametrize("playlist", [False, True])
+def test_hover_preview_follows_timeline_without_moving_handles_or_layout(page, playlist):
+    page.set_viewport_size({"width": 360, "height": 700})
+    page.route("**/storyboards/*", lambda route: route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG))
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtube.com/playlist?list=PL" if playlist else "https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    if playlist:
+        expect(page.locator("#editor-loading")).to_be_hidden()
+    page.evaluate("document.fonts.ready")
+    page.locator("#range-slider").scroll_into_view_if_needed()
+    bounds = page.locator("#range-slider").bounding_box()
+    quality = page.locator("#quality").bounding_box()
+    for fraction in [0, 0.5, 1]:
+        x = bounds["x"] + 12 + (bounds["width"] - 24) * fraction
+        page.mouse.move(x, bounds["y"] + 24)
+        expect(page.locator("#range-preview-frame")).to_be_visible()
+        expect(page.locator("#range-preview-time")).to_have_text({0: "0:00", 0.5: "1:00", 1: "2:00"}[fraction])
+        bubble = page.locator("#range-preview").bounding_box()
+        assert bubble["y"] + bubble["height"] < bounds["y"] + 24
+        assert bubble["x"] >= bounds["x"] - 1
+        assert bubble["x"] + bubble["width"] <= bounds["x"] + bounds["width"] + 1
+        anchor = page.locator("#range-preview").evaluate("el => parseFloat(el.style.getPropertyValue('--preview-anchor'))")
+        assert abs(bubble["x"] + anchor - x) < 1
+        assert page.locator("#range-slider").bounding_box() == bounds
+        assert page.locator("#quality").bounding_box() == quality
+    expect(page.locator("#range-start")).to_have_value("0")
+    expect(page.locator("#range-end")).to_have_value("120")
+    page.mouse.move(0, 0)
+    expect(page.locator("#range-preview")).to_be_hidden()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+def test_late_thumbnail_cannot_replace_new_position_or_playlist_item(page):
+    pending = []
+    page.route("**/storyboards/*", lambda route: pending.append(route))
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtube.com/playlist?list=PL")
+    expect(page.locator("#editor-loading")).to_be_hidden()
+    expect(page.locator("#range-section")).to_be_visible()
+    with page.expect_request("**/storyboards/*"):
+        set_range(page, "start", 24)
+    expect(page.locator("#range-preview-status")).to_have_text("Loading preview…")
+    for route in list(pending):
+        route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:24")
+    assert frame_pixel(page) == [0, 0, 255, 255]
+    pending.clear()
+    set_range(page, "start", 48)
+    expect(page.locator("#range-preview-status")).to_have_text("Loading preview…")
+    page.locator('.playlist-item[data-index="2"] .playlist-open').click()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    for route in pending:
+        route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+    expect(page.locator("#range-preview")).to_be_hidden()
+    expect(page.locator("#range-end")).to_have_value("240")
+
+
+@pytest.mark.parametrize("failure", ["network", "timeout"])
+@pytest.mark.parametrize("retry_seconds", [12, 24])
+def test_failed_thumbnail_can_retry_same_sheet(page, failure, retry_seconds):
+    requested = []
+    pending = []
+
+    def image(route):
+        requested.append(route.request.url)
+        if len(requested) == 1:
+            if failure == "network":
+                route.abort("internetdisconnected")
+            else:
+                pending.append(route)
+        else:
+            route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+
+    page.route("**/storyboards/*", image)
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    if failure == "timeout":
+        page.clock.install()
+    set_range(page, "start", 12)
+    if failure == "timeout":
+        expect(page.locator("#range-preview-status")).to_have_text("Loading preview…")
+        page.clock.fast_forward(10001)
+    expect(page.locator("#range-preview-status")).to_have_text("Preview unavailable")
+    expect(page.locator("#range-preview-frame")).to_be_hidden()
+    for route in pending:
+        route.abort("timedout")
+
+    set_range(page, "start", retry_seconds)
+    expect(page.locator("#range-preview-frame")).to_be_visible()
+    expect(page.locator("#range-preview-status")).to_be_hidden()
+    expect(page.locator("#range-preview-frame")).to_have_attribute(
+        "aria-label", f"Preview near 0:{retry_seconds}")
+    assert frame_pixel(page) == ([0, 255, 0, 255] if retry_seconds == 12 else [0, 0, 255, 255])
+    assert len(requested) == 2
+    set_range(page, "start", 36)
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:36")
+    assert frame_pixel(page) == [255, 255, 0, 255]
+    assert len(requested) == 2
+
+
+def test_failed_thumbnail_does_not_block_clip_download(page):
+    page.route("**/storyboards/*", lambda route: route.fulfill(status=404, body="Missing"))
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    set_range(page, "start", 12)
+    expect(page.locator("#range-preview-status")).to_have_text("Preview unavailable")
+    expect(page.locator("#range-preview-frame")).to_be_hidden()
+    set_range(page, "end", 36)
+    page.locator("#download-btn").click()
+    payload = page.evaluate("window.recorded.enqueued[0]")
+    assert (payload["start_time"], payload["end_time"]) == (12, 36)
+
+
 def test_updates_auto_check_notes_dialog_keyboard_and_safe_text(page):
     assert page.evaluate("window.updateCalls") == ["check"]
     expect(page.locator("#update-banner")).to_be_hidden()

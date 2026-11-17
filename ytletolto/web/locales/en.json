@@ -201,5 +201,9 @@
   "NAMED_MESSAGE": "{name}: {error}",
   "DOWNLOAD_START_FAILED": "Could not start the download: {error}",
   "LANGUAGE_HUNGARIAN": "Magyar",
-  "LANGUAGE_ENGLISH": "English"
+  "LANGUAGE_ENGLISH": "English",
+  "TIMELINE_PREVIEW": "Timeline preview",
+  "PREVIEW_UNAVAILABLE": "Preview unavailable",
+  "LOADING_PREVIEW": "Loading preview…",
+  "PREVIEW_NEAR": "Preview near {time}"
 }

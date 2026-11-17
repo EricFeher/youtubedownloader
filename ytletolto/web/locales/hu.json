@@ -177,5 +177,9 @@
   "NAMED_MESSAGE": "{name}: {error}",
   "DOWNLOAD_START_FAILED": "Nem sikerült elindítani: {error}",
   "LANGUAGE_HUNGARIAN": "Magyar",
-  "LANGUAGE_ENGLISH": "English"
+  "LANGUAGE_ENGLISH": "English",
+  "TIMELINE_PREVIEW": "Idővonal-előnézet",
+  "PREVIEW_UNAVAILABLE": "Az előnézet nem érhető el",
+  "LOADING_PREVIEW": "Előnézet betöltése…",
+  "PREVIEW_NEAR": "Előnézet {time} körül"
 }

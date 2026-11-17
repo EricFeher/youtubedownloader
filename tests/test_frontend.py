@@ -316,6 +316,224 @@ def test_english_plural_forms_and_safe_parameter_substitution(page):
     ]
 
 
+STORYBOARD_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180">
+<path fill="red" d="M0 0h160v90H0z"/><path fill="lime" d="M160 0h160v90H160z"/>
+<path fill="blue" d="M0 90h160v90H0z"/><path fill="yellow" d="M160 90h160v90H160z"/></svg>'''
+
+
+def add_storyboard(page):
+    page.evaluate("""() => {
+      window.videoData.one.storyboard = {width:160,height:90,columns:2,rows:2,fps:1/12,
+        sheets:[{url:'/storyboards/0.svg',start:0,duration:48,frame_count:4},
+                {url:'/storyboards/1.svg',start:48,duration:48,frame_count:4},
+                {url:'/storyboards/2.svg',start:96,duration:24,frame_count:2}]};
+    }""")
+
+
+def frame_pixel(page):
+    return page.locator("#range-preview-frame").evaluate(
+        "canvas => [...canvas.getContext('2d').getImageData(160,60,1,1).data]")
+
+
+@pytest.mark.parametrize("preview_state", ["available", "loading", "unavailable"])
+def test_timeline_preview_translations_preserve_range_and_cached_frames(page, preview_state):
+    pending = []
+    if preview_state != "unavailable":
+        page.route("**/storyboards/*", lambda route: pending.append(route))
+        add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    set_range(page, "start", 12)
+    if preview_state == "available":
+        expect(page.locator("#range-preview-status")).to_have_text("El\u0151n\u00e9zet bet\u00f6lt\u00e9se\u2026")
+        for route in pending:
+            route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+        expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "El\u0151n\u00e9zet 0:12 k\u00f6r\u00fcl")
+    # Invoke the menu action without moving the pointer away from the preview.
+    page.locator('[data-language="en"]').evaluate("button => button.click()")
+    expect(page.locator("#range-start")).to_have_value("12")
+    if preview_state == "available":
+        expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:12")
+        assert frame_pixel(page) == [0, 255, 0, 255]
+    elif preview_state == "loading":
+        expect(page.locator("#range-preview-status")).to_have_text("Loading preview\u2026")
+        for route in pending:
+            route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+        expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:12")
+        assert frame_pixel(page) == [0, 255, 0, 255]
+    else:
+        expect(page.locator("#range-preview-status")).to_have_text("Preview unavailable")
+    page.locator('[data-language="hu"]').evaluate("button => button.click()")
+    if preview_state == "unavailable":
+        expect(page.locator("#range-preview-status")).to_have_text("Az el\u0151n\u00e9zet nem \u00e9rhet\u0151 el")
+    else:
+        expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "El\u0151n\u00e9zet 0:12 k\u00f6r\u00fcl")
+
+
+def test_timeline_thumbnails_follow_handles_keyboard_and_final_partial_sheet(page):
+    set_language(page, "en")
+    requested = []
+
+    def image(route):
+        requested.append(route.request.url)
+        route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+
+    page.route("**/storyboards/*", image)
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    page.locator("#range-end").focus()
+    expect(page.locator("#range-preview-frame")).to_be_visible()
+    expect(page.locator("#range-preview-time")).to_have_text("2:00")
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 1:48")
+    assert frame_pixel(page) == [0, 255, 0, 255]  # Last valid cell, not a blank one.
+    set_range(page, "start", 12)
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:12")
+    assert frame_pixel(page) == [0, 255, 0, 255]
+    page.locator("#range-start").press("Shift+ArrowRight")
+    page.locator("#range-start").press("ArrowRight")
+    page.locator("#range-start").press("ArrowRight")
+    expect(page.locator("#range-preview-time")).to_have_text("0:24")
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:24")
+    assert frame_pixel(page) == [0, 0, 255, 255]
+    bounds = page.locator("#range-slider").bounding_box()
+    x, y, width = bounds["x"] + 12, bounds["y"] + 24, bounds["width"] - 24
+    page.mouse.move(x + width, y)
+    page.mouse.down()
+    page.mouse.move(x + width * 0.4, y, steps=5)
+    expect(page.locator("#range-preview-time")).to_have_text("0:48")
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:48")
+    assert frame_pixel(page) == [255, 0, 0, 255]
+    page.mouse.up()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    page.locator("#range-reset").click()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    expect(page.locator("#range-start")).to_have_value("0")
+    expect(page.locator("#range-end")).to_have_value("120")
+    assert len(requested) == 3
+
+
+@pytest.mark.parametrize("playlist", [False, True])
+def test_hover_preview_follows_timeline_without_moving_handles_or_layout(page, playlist):
+    set_language(page, "en")
+    page.set_viewport_size({"width": 360, "height": 700})
+    page.route("**/storyboards/*", lambda route: route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG))
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtube.com/playlist?list=PL" if playlist else "https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    if playlist:
+        expect(page.locator("#editor-loading")).to_be_hidden()
+    page.evaluate("document.fonts.ready")
+    page.locator("#range-slider").scroll_into_view_if_needed()
+    bounds = page.locator("#range-slider").bounding_box()
+    quality = page.locator("#quality").bounding_box()
+    for fraction in [0, 0.5, 1]:
+        x = bounds["x"] + 12 + (bounds["width"] - 24) * fraction
+        page.mouse.move(x, bounds["y"] + 24)
+        expect(page.locator("#range-preview-frame")).to_be_visible()
+        expect(page.locator("#range-preview-time")).to_have_text({0: "0:00", 0.5: "1:00", 1: "2:00"}[fraction])
+        bubble = page.locator("#range-preview").bounding_box()
+        assert bubble["y"] + bubble["height"] < bounds["y"] + 24
+        assert bubble["x"] >= bounds["x"] - 1
+        assert bubble["x"] + bubble["width"] <= bounds["x"] + bounds["width"] + 1
+        anchor = page.locator("#range-preview").evaluate("el => parseFloat(el.style.getPropertyValue('--preview-anchor'))")
+        assert abs(bubble["x"] + anchor - x) < 1
+        assert page.locator("#range-slider").bounding_box() == bounds
+        assert page.locator("#quality").bounding_box() == quality
+    expect(page.locator("#range-start")).to_have_value("0")
+    expect(page.locator("#range-end")).to_have_value("120")
+    page.mouse.move(0, 0)
+    expect(page.locator("#range-preview")).to_be_hidden()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+
+
+def test_late_thumbnail_cannot_replace_new_position_or_playlist_item(page):
+    set_language(page, "en")
+    pending = []
+    page.route("**/storyboards/*", lambda route: pending.append(route))
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtube.com/playlist?list=PL")
+    expect(page.locator("#editor-loading")).to_be_hidden()
+    expect(page.locator("#range-section")).to_be_visible()
+    with page.expect_request("**/storyboards/*"):
+        set_range(page, "start", 24)
+    expect(page.locator("#range-preview-status")).to_have_text("Loading preview…")
+    for route in list(pending):
+        route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:24")
+    assert frame_pixel(page) == [0, 0, 255, 255]
+    pending.clear()
+    set_range(page, "start", 48)
+    expect(page.locator("#range-preview-status")).to_have_text("Loading preview…")
+    page.locator('.playlist-item[data-index="2"] .playlist-open').click()
+    expect(page.locator("#range-preview")).to_be_hidden()
+    for route in pending:
+        route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+    expect(page.locator("#range-preview")).to_be_hidden()
+    expect(page.locator("#range-end")).to_have_value("240")
+
+
+@pytest.mark.parametrize("failure", ["network", "timeout"])
+@pytest.mark.parametrize("retry_seconds", [12, 24])
+def test_failed_thumbnail_can_retry_same_sheet(page, failure, retry_seconds):
+    set_language(page, "en")
+    requested = []
+    pending = []
+
+    def image(route):
+        requested.append(route.request.url)
+        if len(requested) == 1:
+            if failure == "network":
+                route.abort("internetdisconnected")
+            else:
+                pending.append(route)
+        else:
+            route.fulfill(content_type="image/svg+xml", body=STORYBOARD_SVG)
+
+    page.route("**/storyboards/*", image)
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    if failure == "timeout":
+        page.clock.install()
+    set_range(page, "start", 12)
+    if failure == "timeout":
+        expect(page.locator("#range-preview-status")).to_have_text("Loading preview…")
+        page.clock.fast_forward(10001)
+    expect(page.locator("#range-preview-status")).to_have_text("Preview unavailable")
+    expect(page.locator("#range-preview-frame")).to_be_hidden()
+    for route in pending:
+        route.abort("timedout")
+
+    set_range(page, "start", retry_seconds)
+    expect(page.locator("#range-preview-frame")).to_be_visible()
+    expect(page.locator("#range-preview-status")).to_be_hidden()
+    expect(page.locator("#range-preview-frame")).to_have_attribute(
+        "aria-label", f"Preview near 0:{retry_seconds}")
+    assert frame_pixel(page) == ([0, 255, 0, 255] if retry_seconds == 12 else [0, 0, 255, 255])
+    assert len(requested) == 2
+    set_range(page, "start", 36)
+    expect(page.locator("#range-preview-frame")).to_have_attribute("aria-label", "Preview near 0:36")
+    assert frame_pixel(page) == [255, 255, 0, 255]
+    assert len(requested) == 2
+
+
+def test_failed_thumbnail_does_not_block_clip_download(page):
+    set_language(page, "en")
+    page.route("**/storyboards/*", lambda route: route.fulfill(status=404, body="Missing"))
+    add_storyboard(page)
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    set_range(page, "start", 12)
+    expect(page.locator("#range-preview-status")).to_have_text("Preview unavailable")
+    expect(page.locator("#range-preview-frame")).to_be_hidden()
+    set_range(page, "end", 36)
+    page.locator("#download-btn").click()
+    payload = page.evaluate("window.recorded.enqueued[0]")
+    assert (payload["start_time"], payload["end_time"]) == (12, 36)
+
+
 def test_updates_auto_check_notes_dialog_keyboard_and_safe_text(page):
     assert page.evaluate("window.updateCalls") == ["check"]
     expect(page.locator("#update-banner")).to_be_hidden()
@@ -519,21 +737,49 @@ def test_full_range_sends_no_cut_and_checkbox_does_not_change_editor(page):
     assert all(item["options"]["start_time"] == 0 and item["options"]["end_time"] is None for item in payload["items"][0]["selection"])
 
 
-def test_close_range_handles_can_both_be_dragged(page):
+@pytest.mark.parametrize("side,initial,target,offset_x,offset_y", [
+    ("start", 20, 40, -15, 19),
+    ("end", 100, 80, 15, -19),
+])
+def test_range_handles_can_be_grabbed_outside_visible_circle(page, side, initial, target, offset_x, offset_y):
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    set_range(page, "start", 20)
+    set_range(page, "end", 100)
+    bounds = page.locator("#range-slider").bounding_box()
+    width = bounds["width"] - 24
+    x = bounds["x"] + 12 + width * initial / 120 + offset_x
+    y = bounds["y"] + 24 + offset_y
+    page.mouse.move(x, y)
+    page.mouse.down()
+    # A láthatatlan fogási terület szélén megfogva se ugorjon el az időpont.
+    expect(page.locator(f"#range-{side}")).to_have_value(str(initial))
+    page.mouse.move(x + width * (target - initial) / 120, y, steps=8)
+    page.mouse.up()
+    expect(page.locator(f"#range-{side}")).to_have_value(str(target))
+    expect(page.locator("#range-end" if side == "start" else "#range-start")).to_have_value("100" if side == "start" else "20")
+
+
+@pytest.mark.parametrize("side", ["start", "end"])
+@pytest.mark.parametrize("end", [61, 66])
+def test_close_range_handles_can_both_be_dragged(page, side, end):
     page.locator("#url").fill("https://youtu.be/one")
     expect(page.locator("#range-section")).to_be_visible()
     set_range(page, "start", 60)
-    set_range(page, "end", 61)
+    set_range(page, "end", end)
     bounds = page.locator("#range-slider").bounding_box()
     width, y = bounds["width"] - 24, bounds["y"] + 24
-    # Az összecsúszott fogantyúk bal felét megfogva a kezdet mozdul.
-    x = bounds["x"] + 12 + width * 60 / 120 - 4
+    # Az összecsúszott fogantyúk két fele a megfelelő végpontot mozgassa.
+    offset = (-4 if end == 61 else 12) * (1 if side == "start" else -1)
+    x = bounds["x"] + 12 + width * (60 if side == "start" else end) / 120 + offset
     page.mouse.move(x, y)
     page.mouse.down()
-    page.mouse.move(bounds["x"] + 12 + width / 4, y, steps=8)
+    expect(page.locator("#range-start")).to_have_value("60")
+    expect(page.locator("#range-end")).to_have_value(str(end))
+    page.mouse.move(bounds["x"] + 12 + width * (0.25 if side == "start" else 0.75) + offset, y, steps=8)
     page.mouse.up()
-    expect(page.locator("#range-start")).to_have_value("30")
-    expect(page.locator("#range-end")).to_have_value("61")
+    expect(page.locator("#range-start")).to_have_value("30" if side == "start" else "60")
+    expect(page.locator("#range-end")).to_have_value(str(end) if side == "start" else "90")
 
 
 def test_queue_updates_video_image_even_when_download_state_is_unchanged(page):

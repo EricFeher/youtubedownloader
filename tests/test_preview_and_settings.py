@@ -4,9 +4,48 @@ import pytest
 import yt_dlp
 
 from ytletolto import downloader, settings
-from ytletolto.downloader import Tools, available_qualities, probe, quality_key, quality_tier, summarize
+from ytletolto.downloader import Tools, available_qualities, probe, quality_key, quality_tier, summarize, storyboard_preview
 
 TOOLS = Tools(ffmpeg_dir=Path("/opt/ffmpeg"))
+
+
+def test_storyboards_use_extractor_timing_and_partial_final_sheet():
+    from yt_dlp.extractor.youtube import YoutubeIE
+
+    # Ten frames in 2x2 sheets, including a final sheet with two empty cells.
+    spec = "https://i.ytimg.com/sb/test/storyboard$L/$N.jpg?sqp=x|160#90#10#2#2#12000#M$M#signature"
+    response = {"storyboards": {"playerStoryboardSpecRenderer": {"spec": spec}}}
+    formats = list(YoutubeIE(yt_dlp.YoutubeDL({"quiet": True}))._extract_storyboard([response], 120))
+    board = summarize({"duration": 120, "formats": formats}).storyboard
+
+    assert (board.width, board.height, board.columns, board.rows, board.fps) == (160, 90, 2, 2, 1 / 12)
+    assert [(sheet.start, sheet.duration, sheet.frame_count) for sheet in board.sheets] == [
+        (0, 48, 4), (48, 48, 4), (96, 24, 2),
+    ]
+    assert "M2.jpg" in board.sheets[-1].url
+
+
+def test_storyboard_chooses_largest_complete_track_and_survives_missing_data():
+    small = {"protocol": "mhtml", "width": 80, "height": 45, "rows": 2, "columns": 2, "fps": 0.1,
+             "fragments": [{"url": "https://img/small.jpg", "duration": 40}]}
+    large = {**small, "width": 160, "height": 90}
+    broken = {**large, "width": 320, "fragments": [*large["fragments"], {"duration": 40}]}
+    assert storyboard_preview({"formats": [large, small, broken]}).width == 160
+    assert storyboard_preview({}) is None
+    assert summarize({"_type": "playlist", "formats": [large]}).storyboard is None
+
+
+@pytest.mark.parametrize("changes", [
+    {"fps": None}, {"fps": 0}, {"fps": float("nan")}, {"columns": 0}, {"height": None},
+    {"fragments": []}, {"fragments": [{"url": "file:///private", "duration": 10}]},
+    {"fragments": [{"url": "https://img/frame.jpg", "duration": float("inf")}]},
+])
+def test_invalid_storyboards_do_not_break_video_metadata(changes):
+    fmt = {"protocol": "mhtml", "width": 160, "height": 90, "rows": 2, "columns": 2, "fps": 0.1,
+           "fragments": [{"url": "https://img/frame.jpg", "duration": 40}], **changes}
+    result = summarize({"title": "Video", "duration": 120, "formats": [fmt]})
+    assert result.title == "Video"
+    assert result.storyboard is None
 
 
 def fmt(format_id, ext, width, height, vcodec, acodec="none", fps=30, size=None):

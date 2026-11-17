@@ -13,7 +13,7 @@ import pytest
 from yt_dlp.utils import DownloadError
 
 from ytletolto.download_queue import build_requests
-from ytletolto.downloader import DownloadRequest, Downloader, Finished, Mode, Progress, Status, Thumbnail, Tools, build_ydl_opts
+from ytletolto.downloader import DownloadRequest, Downloader, Finished, Mode, Progress, Status, Thumbnail, Tools, build_ydl_opts, find_tools
 from ytletolto.i18n import TEXT, Message
 
 
@@ -66,6 +66,12 @@ class QuietHandler(SimpleHTTPRequestHandler):
 @pytest.fixture
 def local_media(tmp_path):
     ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
+    tools = find_tools()
+    if tools.ffmpeg_dir:
+        suffix = ".exe" if os.name == "nt" else ""
+        ffmpeg = ffmpeg or str(tools.ffmpeg_dir / f"ffmpeg{suffix}")
+        probe = tools.ffmpeg_dir / f"ffprobe{suffix}"
+        ffprobe = ffprobe or (str(probe) if probe.is_file() else None)
     if not ffmpeg or not ffprobe:
         pytest.skip("A média-integrációs tesztekhez ffmpeg és ffprobe szükséges.")
     source = tmp_path / "source.mp4"
@@ -113,6 +119,20 @@ def test_real_section_download_produces_selected_duration(local_media, tmp_path,
     assert float(info["format"]["duration"]) == pytest.approx(1.5, abs=0.2)
     assert any(s["codec_type"] == "video" for s in info["streams"]) is (mode is Mode.VIDEO)
     assert any(s["codec_type"] == "audio" for s in info["streams"])
+
+
+@pytest.mark.parametrize("mode", [Mode.VIDEO, Mode.AUDIO])
+def test_section_download_finds_bundled_ffmpeg_without_path(local_media, tmp_path, monkeypatch, mode):
+    url, ffmpeg_dir, ffprobe = local_media
+    monkeypatch.setenv("PATH", "")
+    events = []
+    request = DownloadRequest(url, tmp_path / "out", mode, start_time=1, end_time=2.5)
+    Downloader(events.append, Tools(ffmpeg_dir)).run(request)
+    result = events[-1]
+    assert isinstance(result, Finished) and result.ok, events
+    assert len(result.files) == 1
+    info = json.loads(subprocess.check_output([ffprobe, "-v", "error", "-show_format", "-of", "json", result.files[0]]))
+    assert float(info["format"]["duration"]) == pytest.approx(1.5, abs=0.2)
 
 
 @pytest.mark.parametrize("mode", [Mode.VIDEO, Mode.AUDIO])

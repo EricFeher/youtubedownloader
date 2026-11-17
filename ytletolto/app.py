@@ -33,6 +33,7 @@ from .download_queue import (
     is_playlist_url,
 )
 from .downloader import Downloader, Progress, find_tools, probe
+from .i18n import TEXT, Message, exception_message, message_payload
 from .updater import Updater
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -58,29 +59,29 @@ class Api:
 
     def init(self) -> dict:
         return {
-            "settings": self._settings,
+            "settings": {**self._settings, "language": settings_store.resolve_language(self._settings.get("language"))},
             "ffmpeg": bool(self._tools.ffmpeg_dir),
             "js_runtime": bool(self._tools.js_runtimes),
-            "queue": event_payload(self._queue.snapshot()),
-            "update": self._updates.snapshot(),
+            "queue": message_payload(event_payload(self._queue.snapshot())),
+            "update": message_payload(self._updates.snapshot()),
         }
 
     def check_update(self) -> dict:
-        return self._updates.check()
+        return message_payload(self._updates.check())
 
     def download_update(self) -> dict:
-        return self._updates.download()
+        return message_payload(self._updates.download())
 
     def install_update(self) -> dict:
         with self._update_guard:
             if any(item.state.value in {"queued", "running"} for item in self._queue.snapshot().items):
-                return {"ok": False, "error": "A frissítéshez előbb várd meg a letöltési sor végét."}
+                return {"ok": False, "error": message_payload(Message(TEXT.UPDATE_QUEUE_PENDING))}
             if not self._window:
-                return {"ok": False, "error": "Az alkalmazás ablaka nem érhető el."}
+                return {"ok": False, "error": message_payload(Message(TEXT.APP_WINDOW_UNAVAILABLE))}
             try:
                 self._updates.launch_installer()
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": message_payload(exception_message(exc))}
             self._window.destroy()
             return {"ok": True}
 
@@ -88,9 +89,9 @@ class Api:
         try:
             return {"ok": True, "info": dataclasses.asdict(probe(url.strip(), self._tools, bool(playlist)))}
         except DownloadError as e:
-            return {"ok": False, "error": _short_error(str(e))}
+            return {"ok": False, "error": message_payload(_short_error(exception_message(e)))}
         except Exception as e:  # noqa: BLE001 - a felületnek minden hibáról tudnia kell
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": message_payload(exception_message(e))}
 
     def paste(self) -> str:
         return read_clipboard()
@@ -117,13 +118,16 @@ class Api:
         reveal_file(Path(path))
 
     def save_settings(self, changes: dict) -> None:
+        changes = dict(changes)
+        if "language" in changes:
+            changes["language"] = settings_store.normalize_language(changes["language"])
         self._settings.update({k: v for k, v in changes.items() if k in settings_store.DEFAULTS})
         settings_store.save(self._settings)
 
     def enqueue(self, options: dict) -> dict:
         with self._update_guard:
             if self._updates.snapshot()["status"] == "installing":
-                return {"ok": False, "error": "A frissítés telepítése folyamatban van."}
+                return {"ok": False, "error": message_payload(Message(TEXT.UPDATE_INSTALLING))}
             return self._enqueue(options)
 
     def _enqueue(self, options: dict) -> dict:
@@ -142,9 +146,9 @@ class Api:
             try:
                 requests = build_requests(url, options, output_dir, playlist, entry.get("selection"))
             except (TypeError, ValueError) as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": message_payload(exception_message(exc))}
             if not requests:
-                return {"ok": False, "error": "Jelölj ki legalább egy elemet a listában."}
+                return {"ok": False, "error": message_payload(Message(TEXT.PLAYLIST_SELECTION_REQUIRED))}
             selection = entry.get("selection")
             for request in requests:
                 title = entry.get("title") or ""
@@ -158,9 +162,9 @@ class Api:
                     title = first.get("title") or ""
                 entries.append((request, title, thumbnail, playlist_title))
         if not entries:
-            return {"ok": False, "error": "Adj meg egy linket."}
+            return {"ok": False, "error": message_payload(Message(TEXT.LINK_REQUIRED))}
         if not self._tools.ffmpeg_dir:
-            return {"ok": False, "error": "Az ffmpeg nem található. Telepítsd, vagy használd a csomagolt alkalmazást."}
+            return {"ok": False, "error": message_payload(Message(TEXT.FFMPEG_MISSING))}
 
         added = sum(1 for item in self._queue.add_many(entries) if item)
         # A playlist egyedi videóbeállításai nem írják át az alkalmazás alapértékeit.
@@ -197,7 +201,7 @@ class Api:
     def _emit_update(self, state: dict) -> None:
         if self._window:
             try:
-                self._window.evaluate_js(f"window.app && window.app.onUpdate({json.dumps(state)})")
+                self._window.evaluate_js(f"window.app && window.app.onUpdate({json.dumps(message_payload(state))})")
             except Exception:
                 pass  # The user may close the window during a network request.
 
@@ -209,7 +213,7 @@ class Api:
             self._last_progress = now
         if not self._window:
             return
-        self._window.evaluate_js(f"window.app && window.app.onEvent({json.dumps(event_payload(event))})")
+        self._window.evaluate_js(f"window.app && window.app.onEvent({json.dumps(message_payload(event_payload(event)))})")
 
     def on_closing(self) -> None:
         self._queue.shutdown()
@@ -276,10 +280,12 @@ def _read_clipboard_windows() -> str:
 
 
 def _short_error(message: str) -> str:
+    if isinstance(message, Message):
+        return message
     message = message.removeprefix("ERROR: ").strip()
     if "[youtube]" in message and ":" in message:
         message = message.split(":", 2)[-1].strip()
-    return message or "Nem sikerült lekérni a videó adatait."
+    return message or Message(TEXT.VIDEO_DETAILS_FETCH_FAILED)
 
 
 def main() -> None:

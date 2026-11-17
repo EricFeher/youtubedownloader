@@ -17,6 +17,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from .i18n import TEXT, Message, exception_message
 from . import APP_NAME
 from ._build import FLAVOR, REPOSITORY, VERSION
 
@@ -28,7 +29,7 @@ MAX_PACKAGE_SIZE = 2 * 1024**3
 def version_tuple(value: str) -> tuple[int, int, int]:
     match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value)
     if not match:
-        raise ValueError("A kiadás verziója nem érvényes (vX.Y.Z szükséges).")
+        raise ValueError(Message(TEXT.RELEASE_VERSION_INVALID))
     return tuple(int(part) for part in match.groups())
 
 
@@ -54,18 +55,18 @@ def extract_package(archive_path: Path, destination: Path) -> Path:
             parts = member.filename.replace("\\", "/").split("/")
             if (parts[0] != APP_NAME or any(p in {"..", "."} or ":" in p for p in parts)
                     or (member.external_attr >> 16) & 0o170000 == 0o120000):
-                raise ValueError("A frissítési csomag nem biztonságos útvonalat tartalmaz.")
+                raise ValueError(Message(TEXT.UPDATE_PATH_UNSAFE))
             total += member.file_size
             if total > MAX_PACKAGE_SIZE:
-                raise ValueError("A kicsomagolt frissítés túl nagy.")
+                raise ValueError(Message(TEXT.UPDATE_EXTRACTED_TOO_LARGE))
         archive.extractall(destination)
     bundle = destination / APP_NAME
     exe = bundle / f"{APP_NAME}.exe"
     if not exe.is_file() or not (bundle / "_internal").is_dir():
-        raise ValueError("Hiányos Windows-frissítési csomag.")
+        raise ValueError(Message(TEXT.INCOMPLETE_WINDOWS_UPDATE_PACKAGE))
     with exe.open("rb") as source:
         if source.read(2) != b"MZ":
-            raise ValueError("Érvénytelen Windows-programfájl.")
+            raise ValueError(Message(TEXT.INVALID_WINDOWS_EXECUTABLE))
     return bundle
 
 
@@ -106,21 +107,21 @@ class Updater:
                 with _get(f"https://api.github.com/repos/{REPOSITORY}/releases/latest") as response:
                     raw = response.read(2 * 1024**2 + 1)
                 if len(raw) > 2 * 1024**2:
-                    raise ValueError("Túl nagy kiadási leírás.")
+                    raise ValueError(Message(TEXT.RELEASE_NOTES_TOO_LARGE))
                 release = json.loads(raw)
                 if release.get("draft") or release.get("prerelease"):
-                    raise ValueError("Ez nem stabil kiadás.")
+                    raise ValueError(Message(TEXT.RELEASE_NOT_STABLE))
                 version = release["tag_name"]
                 available = version_tuple(version) > version_tuple(VERSION)
                 self._release = release
                 return self._set(status="available" if available else "current", available=available,
-                                 version=version.removeprefix("v"), notes=str(release.get("body") or "Ehhez a kiadáshoz még nincs kiadási megjegyzés."),
+                                 version=version.removeprefix("v"), notes=str(release["body"]) if release.get("body") else "",
                                  published_at=str(release.get("published_at") or ""))
             except urllib.error.HTTPError as exc:
-                message = "Még nincs közzétett kiadás." if exc.code == 404 else "A kiadások most nem érhetők el. Próbáld újra később."
+                message = Message(TEXT.RELEASES_EMPTY) if exc.code == 404 else Message(TEXT.RELEASES_UNAVAILABLE)
                 return self._set(status="error", error=message)
             except Exception:  # Network and malformed release data must not interrupt downloads.
-                return self._set(status="error", error="Nem sikerült ellenőrizni a frissítést. Ellenőrizd az internetkapcsolatot, majd próbáld újra.")
+                return self._set(status="error", error=Message(TEXT.UPDATE_CHECK_FAILED))
         finally:
             self._lock.release()
 
@@ -132,17 +133,17 @@ class Updater:
             if state["status"] in {"ready", "installing"}:
                 return state
             if not state["supported"] or not state["available"] or not self._release:
-                return self._set(error="Ehhez a példányhoz nincs telepíthető frissítés.")
+                return self._set(error=Message(TEXT.UPDATE_NOT_INSTALLABLE))
             self._set(status="downloading", progress=0, error="")
             try:
                 asset = next((a for a in self._release.get("assets", []) if a["name"] == ASSETS[FLAVOR] and a.get("state") == "uploaded"), None)
                 if not asset:
-                    raise ValueError("A kiadás még nem tartalmaz ehhez a változathoz frissítési csomagot. Próbáld újra később.")
+                    raise ValueError(Message(TEXT.UPDATE_ASSET_UNAVAILABLE))
                 url, digest, size = asset["browser_download_url"], asset.get("digest", ""), asset["size"]
                 if not _release_url(url) or not re.fullmatch(r"sha256:[a-fA-F0-9]{64}", digest or ""):
-                    raise ValueError("A kiadásból hiányzik az ellenőrzött frissítési csomag.")
+                    raise ValueError(Message(TEXT.UPDATE_ASSET_UNVERIFIED))
                 if not isinstance(size, int) or not 0 < size <= MAX_PACKAGE_SIZE:
-                    raise ValueError("Érvénytelen frissítési csomagméret.")
+                    raise ValueError(Message(TEXT.INVALID_UPDATE_PACKAGE_SIZE))
                 self._cleanup()
                 # Same volume and writable location, outside the files being replaced.
                 self._stage = Path(tempfile.mkdtemp(prefix=".mm-update-", dir=Path(sys.executable).resolve().parent))
@@ -151,10 +152,10 @@ class Updater:
                 with _get(url) as response, package.open("wb") as output:
                     while chunk := response.read(1024 * 1024):
                         if self._closed.is_set():
-                            raise ValueError("A frissítés letöltése megszakadt.")
+                            raise ValueError(Message(TEXT.UPDATE_DOWNLOAD_CANCELLED))
                         received += len(chunk)
                         if received > size:
-                            raise ValueError("A csomag mérete nem egyezik a kiadással.")
+                            raise ValueError(Message(TEXT.UPDATE_SIZE_MISMATCH))
                         output.write(chunk)
                         hasher.update(chunk)
                         progress = int(received * 100 / size)
@@ -162,22 +163,22 @@ class Updater:
                             self._set(progress=progress)
                             last_progress = progress
                 if received != size or hasher.hexdigest() != digest[7:].lower():
-                    raise ValueError("A letöltött frissítés ellenőrzése sikertelen. Próbáld újra.")
+                    raise ValueError(Message(TEXT.UPDATE_VERIFICATION_FAILED))
                 if FLAVOR == "onedir":
                     self._payload = extract_package(package, self._stage / "payload")
                 else:
                     with package.open("rb") as source:
                         if source.read(2) != b"MZ":
-                            raise ValueError("Érvénytelen Windows-programfájl.")
+                            raise ValueError(Message(TEXT.INVALID_WINDOWS_EXECUTABLE))
                     self._payload = self._stage / "payload"
                     self._payload.mkdir()
                     package.replace(self._payload / Path(sys.executable).name)
                 if self._closed.is_set():
-                    raise ValueError("A frissítés letöltése megszakadt.")
+                    raise ValueError(Message(TEXT.UPDATE_DOWNLOAD_CANCELLED))
                 return self._set(status="ready", progress=100)
             except Exception as exc:
                 self._cleanup()
-                message = str(exc) if isinstance(exc, ValueError) else "A frissítés letöltése nem sikerült. Ellenőrizd a kapcsolatot, a szabad helyet és a mappa írhatóságát."
+                message = exception_message(exc) if isinstance(exc, ValueError) else Message(TEXT.UPDATE_DOWNLOAD_FAILED)
                 return self._set(status="error", error=message, progress=None)
         finally:
             self._lock.release()
@@ -185,7 +186,7 @@ class Updater:
     def launch_installer(self) -> None:
         with self._lock:
             if self.snapshot()["status"] != "ready" or not self._stage or not self._payload:
-                raise ValueError("Előbb töltsd le a frissítést.")
+                raise ValueError(Message(TEXT.DOWNLOAD_THE_UPDATE_FIRST))
             exe = Path(sys.executable).resolve()
             # The onedir archive has a fixed executable name; allow a renamed local exe.
             bundled_exe = self._payload / f"{APP_NAME}.exe"

@@ -19,6 +19,8 @@ from tempfile import TemporaryDirectory
 import yt_dlp
 from yt_dlp.utils import DownloadCancelled, DownloadError
 
+from .i18n import TEXT, Message, exception_message
+
 
 class Mode(Enum):
     VIDEO = "video"  # MP4 / MKV / WebM
@@ -50,12 +52,12 @@ class DownloadRequest:
 
     def __post_init__(self) -> None:
         if self.start_time is None:
-            raise ValueError("A kezdőidőt másodpercben kell megadni.")
+            raise ValueError(Message(TEXT.START_TIME_INVALID))
         for value in (self.start_time, self.end_time):
             if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
-                raise ValueError("Az időpontnak véges, másodpercben megadott számnak kell lennie.")
+                raise ValueError(Message(TEXT.TIME_NOT_FINITE))
         if self.start_time < 0 or (self.end_time is not None and self.end_time <= self.start_time):
-            raise ValueError("A kezdet nem lehet negatív, a végének pedig később kell lennie a kezdetnél.")
+            raise ValueError(Message(TEXT.TIME_RANGE_INVALID))
 
     @property
     def is_section(self) -> bool:
@@ -190,7 +192,7 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
 
     container = request.container
     if container not in VIDEO_CONTAINERS:
-        raise ValueError(f"Ismeretlen videóformátum: {container}")
+        raise ValueError(Message(TEXT.UNKNOWN_VIDEO_FORMAT, format=container))
     compatible = request.compatible and container != "webm"  # H.264 nem fér WebM-be
 
     # A HDR-es sáv nem HDR-es kijelzőn fakón jelenik meg, ezért az SDR-t vesszük előre.
@@ -227,7 +229,7 @@ def build_cli_args(request: DownloadRequest, tools: Tools) -> list[str]:
 
 def _audio_args(audio_format: str) -> list[str]:
     if audio_format not in AUDIO_FORMATS:
-        raise ValueError(f"Ismeretlen hangformátum: {audio_format}")
+        raise ValueError(Message(TEXT.UNKNOWN_AUDIO_FORMAT, format=audio_format))
 
     # Az M4A (AAC) és az Opus sávot a YouTube eleve így adja: ha megvan, újrakódolás nélkül átmásoljuk.
     source = {
@@ -300,9 +302,9 @@ def build_ydl_opts(request: DownloadRequest, tools: Tools) -> dict:
         def ranges(info: dict, ydl: yt_dlp.YoutubeDL) -> list[dict]:
             duration = info.get("duration")
             if info.get("is_live"):
-                raise DownloadError("Élő adásból nem választható időtartomány.")
+                raise DownloadError(Message(TEXT.LIVE_TIME_RANGE_UNAVAILABLE))
             if duration is not None and request.start_time >= duration:
-                raise DownloadError(f"{info.get('title') or 'A videó'}: a kezdőidő a videó végén kívül esik.")
+                raise DownloadError(Message(TEXT.START_TIME_BEYOND_VIDEO, title=info.get("title") or Message(TEXT.THE_VIDEO)))
             end = request.end_time if request.end_time is not None else float("inf")
             if duration is not None:
                 end = min(end, duration)
@@ -381,7 +383,7 @@ def summarize(info: dict) -> VideoInfo:
             thumbnail = first.get("url")
         return VideoInfo(
             kind="playlist",
-            title=info.get("title") or "Lejátszási lista",
+            title=info.get("title") or Message(TEXT.PLAYLIST),
             uploader=uploader,
             thumbnail=thumbnail,
             count=info.get("playlist_count") or len(entries) or None,
@@ -541,11 +543,11 @@ class _SectionYoutubeDL(yt_dlp.YoutubeDL):
 
 # A kulcs a yt-dlp utófeldolgozó neve (PostProcessor.pp_key()).
 _POSTPROCESSOR_LABELS = {
-    "Merger": "Videó és hang összefűzése…",
-    "ExtractAudio": "Hangsáv feldolgozása…",
-    "VideoRemuxer": "Átcsomagolás…",
-    "EmbedThumbnail": "Borítókép beágyazása…",
-    "Metadata": "Metaadatok beírása…",
+    "Merger": Message(TEXT.MERGING_VIDEO_AND_AUDIO),
+    "ExtractAudio": Message(TEXT.PROCESSING_AUDIO_TRACK),
+    "VideoRemuxer": Message(TEXT.REMUXING),
+    "EmbedThumbnail": Message(TEXT.EMBEDDING_COVER_ART),
+    "Metadata": Message(TEXT.WRITING_METADATA),
 }
 
 
@@ -593,10 +595,10 @@ class Downloader:
     def run(self, *requests: DownloadRequest) -> None:
         """A kéréseket egymás után futtatja (pl. egy lista videóként és hangként kért elemeit)."""
         if not self._tools.ffmpeg_dir:
-            self._emit(Finished(False, "Az ffmpeg nem található. Telepítsd, vagy használd a csomagolt alkalmazást."))
+            self._emit(Finished(False, Message(TEXT.FFMPEG_MISSING)))
             return
         if not self._tools.js_runtimes:
-            self._emit(Log("Nincs JavaScript futtatókörnyezet (Deno) – a YouTube csak korlátozottan működhet.", "warning"))
+            self._emit(Log(Message(TEXT.JS_RUNTIME_MISSING), "warning"))
 
         if all(r.playlist and r.playlist_ids for r in requests):
             self._item_total = sum(len(r.playlist_ids) for r in requests)
@@ -611,11 +613,11 @@ class Downloader:
                 # biztosítja, hogy a Megszakítás a tényleges letöltést is leállítsa.
                 from .section_worker import download_section
 
-                self._emit(Status("Kijelölt részlet letöltése és feldolgozása…"))
+                self._emit(Status(Message(TEXT.SECTION_PROCESSING)))
                 try:
                     result = download_section(request, self._tools, self._emit, self._cancel)
                 except Exception as e:  # noqa: BLE001 - az előkészítés és a takarítás is hibázhat
-                    self._emit(Finished(False, f"Váratlan hiba: {e}", tuple(files)))
+                    self._emit(Finished(False, Message(TEXT.UNEXPECTED_ERROR, error=str(e)), tuple(files)))
                     return
                 files.extend(path for path in result.files if path not in files)
                 if not result.ok:
@@ -653,11 +655,11 @@ class Downloader:
                         with ydl_class(opts) as ydl:
                             failed |= bool(ydl.download([request.url]))
                     except DownloadCancelled:
-                        download_result = Finished(False, "Letöltés megszakítva.", tuple(files))
+                        download_result = Finished(False, Message(TEXT.DOWNLOAD_CANCELLED), tuple(files))
                     except DownloadError as e:
-                        download_result = Finished(False, _clean_error(str(e)), tuple(files))
+                        download_result = Finished(False, _clean_error(exception_message(e)), tuple(files))
                     except Exception as e:
-                        download_result = Finished(False, f"Váratlan hiba: {e}", tuple(files))
+                        download_result = Finished(False, Message(TEXT.UNEXPECTED_ERROR, error=str(e)), tuple(files))
                     # A yt-dlp darabolt letöltője körkörös hook-hivatkozásokban tarthatja
                     # a nyitott célfájlt. Az except blokkon kívül már a kivétel tracebackje
                     # sem él: a takarítás előtt elengedhetők a Windows-os fájlzárak.
@@ -666,22 +668,22 @@ class Downloader:
                     self._emit(download_result)
                     return
             except DownloadCancelled:
-                self._emit(Finished(False, "Letöltés megszakítva.", tuple(files)))
+                self._emit(Finished(False, Message(TEXT.DOWNLOAD_CANCELLED), tuple(files)))
                 return
             except DownloadError as e:
-                self._emit(Finished(False, _clean_error(str(e)), tuple(files)))
+                self._emit(Finished(False, _clean_error(exception_message(e)), tuple(files)))
                 return
             except Exception as e:  # noqa: BLE001 - a GUI-nak minden hibáról tudnia kell
-                self._emit(Finished(False, f"Váratlan hiba: {e}", tuple(files)))
+                self._emit(Finished(False, Message(TEXT.UNEXPECTED_ERROR, error=str(e)), tuple(files)))
                 return
             self._item_offset += len(request.playlist_ids)
 
         if self._cancel.is_set():
-            self._emit(Finished(False, "Letöltés megszakítva.", tuple(files)))
+            self._emit(Finished(False, Message(TEXT.DOWNLOAD_CANCELLED), tuple(files)))
         elif failed:
-            self._emit(Finished(False, "A letöltés hibával ért véget, részletek a naplóban.", tuple(files)))
+            self._emit(Finished(False, Message(TEXT.DOWNLOAD_FAILED), tuple(files)))
         else:
-            self._emit(Finished(True, "Kész!", tuple(files)))
+            self._emit(Finished(True, Message(TEXT.DOWNLOAD_FINISHED), tuple(files)))
 
     def _cancellable(self, match_filter: Callable[..., str | None] | None) -> Callable[..., str | None]:
         """Megszakítás és az engedélyezett videó borítója, már a tényleges letöltés előtt."""
@@ -744,10 +746,12 @@ class Downloader:
 
 def _fetch_status(request: DownloadRequest, multiple: bool) -> str:
     if not multiple:
-        return "Videó adatainak lekérése…"
-    what = "hangként" if request.mode is Mode.AUDIO else "videóként"
-    return f"{len(request.playlist_ids)} elem előkészítése {what}…"
+        return Message(TEXT.FETCHING_VIDEO_DETAILS)
+    template = TEXT.PREPARING_AUDIO_ITEMS if request.mode is Mode.AUDIO else TEXT.PREPARING_VIDEO_ITEMS
+    return Message(template, count=len(request.playlist_ids))
 
 
 def _clean_error(message: str) -> str:
-    return message.removeprefix("ERROR: ").strip() or "Ismeretlen hiba történt."
+    if isinstance(message, Message):
+        return message
+    return message.removeprefix("ERROR: ").strip() or Message(TEXT.UNKNOWN_ERROR)

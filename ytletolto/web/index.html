@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="hu">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,23 +11,39 @@
   <div class="glow glow-b"></div>
 
   <main class="page">
-    <header class="brand">
-      <img src="mm-mark.png" alt="MediaMinds" class="brand-logo">
-      <h1>Media Minds <span class="gradient-text">Downloader</span></h1>
+    <header class="app-header">
+      <div class="brand">
+        <img src="mm-mark.png" alt="MediaMinds" class="brand-logo">
+        <h1>Media Minds <span class="gradient-text">Downloader</span></h1>
+      </div>
+      <div class="language-picker" id="language-picker">
+        <button type="button" id="language" class="language-trigger" value="en" data-i18n-aria-label="LANGUAGE" aria-haspopup="menu" aria-expanded="false" aria-controls="language-menu" disabled>
+          <img id="language-flag" src="flags/en.svg" alt="" aria-hidden="true">
+          <span id="language-code">EN</span>
+        </button>
+        <div id="language-menu" class="language-menu" role="menu" aria-labelledby="language" hidden>
+          <button type="button" role="menuitemradio" aria-checked="false" data-language="hu" lang="hu">
+            <img src="flags/hu.svg" alt="" aria-hidden="true"><span data-i18n="LANGUAGE_HUNGARIAN"></span><span class="language-check" aria-hidden="true">✓</span>
+          </button>
+          <button type="button" role="menuitemradio" aria-checked="true" data-language="en" lang="en">
+            <img src="flags/en.svg" alt="" aria-hidden="true"><span data-i18n="LANGUAGE_ENGLISH"></span><span class="language-check" aria-hidden="true">✓</span>
+          </button>
+        </div>
+      </div>
     </header>
 
-    <section class="update-banner" id="update-banner" aria-label="Elérhető frissítés" hidden>
-      <div><p class="eyebrow">Új verzió érhető el</p><strong id="update-banner-title"></strong></div>
-      <button type="button" class="btn btn-ghost btn-sm" id="update-banner-open">Újdonságok és frissítés</button>
+    <section class="update-banner" id="update-banner"  data-i18n-aria-label="UPDATE_AVAILABLE" hidden>
+      <div><p class="eyebrow" data-i18n="NEW_VERSION_AVAILABLE"></p><strong id="update-banner-title"></strong></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="update-banner-open" data-i18n="UPDATE_BANNER_ACTION"></button>
     </section>
 
     <section class="hero">
       <form class="url-bar" id="url-form" autocomplete="off">
         <svg class="url-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></svg>
-        <input id="url" type="url" placeholder="Illeszd be a YouTube linket (akár többet is)…" spellcheck="false" aria-label="YouTube link">
+        <input id="url" type="url"  data-i18n-placeholder="URL_PLACEHOLDER" spellcheck="false"  data-i18n-aria-label="YOUTUBE_LINK">
         <button type="button" class="btn btn-ghost" id="paste-btn">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
-          Beillesztés
+          <span data-i18n="PASTE"></span>
         </button>
       </form>
 
@@ -37,7 +53,7 @@
           <span class="duration" id="duration" hidden></span>
         </div>
         <div class="preview-body">
-          <p class="eyebrow" id="preview-kind">Videó</p>
+          <p class="eyebrow" id="preview-kind" data-i18n="VIDEO"></p>
           <h2 id="title"></h2>
           <p class="muted" id="uploader"></p>
         </div>
@@ -53,7 +69,7 @@
       <div class="batch" id="batch" hidden>
         <div class="batch-head">
           <p class="eyebrow" id="batch-count"></p>
-          <button type="button" class="btn btn-ghost btn-sm" id="batch-clear">Mégse</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="batch-clear" data-i18n="CANCEL"></button>
         </div>
         <ul class="batch-list" id="batch-list"></ul>
       </div>
@@ -62,17 +78,17 @@
       <p class="inline-note" id="notice" hidden></p>
     </section>
 
-    <section class="card playlist-card" id="playlist-card" aria-label="A lejátszási lista elemei" hidden>
+    <section class="card playlist-card" id="playlist-card"  data-i18n-aria-label="PLAYLIST_ITEMS_LABEL" hidden>
       <div class="playlist-head">
         <div>
-          <h3 class="card-title">A lista elemei</h3>
+          <h3 class="card-title" data-i18n="PLAYLIST_ITEMS"></h3>
           <p class="hint" id="playlist-summary"></p>
         </div>
         <div class="playlist-bulk">
-          <button type="button" class="btn btn-ghost btn-sm" data-select="all">Mind kijelölése</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-select="none">Kijelölés törlése</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-all="video">Mind videó</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-all="audio">Mind hang</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-select="all" data-i18n="SELECT_ALL"></button>
+          <button type="button" class="btn btn-ghost btn-sm" data-select="none" data-i18n="DESELECT_ALL"></button>
+          <button type="button" class="btn btn-ghost btn-sm" data-all="video" data-i18n="ALL_VIDEO"></button>
+          <button type="button" class="btn btn-ghost btn-sm" data-all="audio" data-i18n="ALL_AUDIO"></button>
         </div>
       </div>
       <ol class="playlist-items" id="playlist-items"></ol>
@@ -89,53 +105,53 @@
       <div class="preview editor-preview" id="editor-preview" hidden>
         <div class="thumb" id="editor-thumb"></div>
         <div class="preview-body">
-          <p class="eyebrow">Kiválasztott videó</p>
+          <p class="eyebrow" data-i18n="SELECTED_VIDEO"></p>
           <h2 id="editor-title"></h2>
           <p class="muted" id="editor-meta"></p>
         </div>
       </div>
-      <p class="hint" id="editor-loading" role="status" hidden>Videó adatainak betöltése…</p>
+      <p class="hint" id="editor-loading" role="status" hidden data-i18n="LOADING_VIDEO_DETAILS"></p>
       <p class="inline-error" id="editor-error" role="alert" hidden></p>
 
-      <section class="range-section" id="range-section" aria-label="Letöltendő időtartomány" hidden>
+      <section class="range-section" id="range-section"  data-i18n-aria-label="DOWNLOAD_TIME_RANGE" hidden>
         <div class="range-heading">
-          <h3 class="card-title">Letöltendő részlet</h3>
-          <button type="button" class="btn btn-ghost btn-sm" id="range-reset">Teljes videó</button>
+          <h3 class="card-title" data-i18n="DOWNLOAD_SECTION"></h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="range-reset" data-i18n="FULL_VIDEO"></button>
         </div>
         <div class="range-values">
-          <label for="range-start">Kezdet <output id="range-start-value">0:00</output></label>
-          <label for="range-end">Vége <output id="range-end-value">0:00</output></label>
+          <label for="range-start"><span data-i18n="START"></span> <output id="range-start-value">0:00</output></label>
+          <label for="range-end"><span data-i18n="END"></span> <output id="range-end-value">0:00</output></label>
         </div>
         <div class="range-slider" id="range-slider">
           <div class="range-track"></div>
           <div class="range-selection" id="range-selection"></div>
-          <input type="range" min="0" max="1" step="1" value="0" id="range-start" aria-label="Részlet kezdete">
-          <input type="range" min="0" max="1" step="1" value="1" id="range-end" aria-label="Részlet vége">
+          <input type="range" min="0" max="1" step="1" value="0" id="range-start"  data-i18n-aria-label="SECTION_START">
+          <input type="range" min="0" max="1" step="1" value="1" id="range-end"  data-i18n-aria-label="SECTION_END">
         </div>
         <div class="range-scale"><span>0:00</span><span id="range-duration"></span></div>
         <p class="hint range-summary" id="range-summary" role="status"></p>
       </section>
 
-      <h3 class="card-title" id="mode-title">Formátum</h3>
+      <h3 class="card-title" id="mode-title" data-i18n="FORMAT"></h3>
       <div class="format-grid" role="radiogroup" id="mode-grid">
         <label class="format-option">
           <input type="radio" name="mode" value="video" checked>
           <span class="format-box">
             <span class="format-icon"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="15" height="14" rx="3"/><path d="m17 10 5-3v10l-5-3"/></svg></span>
-            <span><strong>Videó</strong><small>MP4, MKV, WebM · akár 4K</small></span>
+            <span><strong data-i18n="VIDEO"></strong><small data-i18n="VIDEO_FORMATS_HINT"></small></span>
           </span>
         </label>
         <label class="format-option">
           <input type="radio" name="mode" value="audio">
           <span class="format-box">
             <span class="format-icon"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
-            <span><strong>Csak hang</strong><small>MP3, M4A, Opus, WAV</small></span>
+            <span><strong data-i18n="AUDIO_ONLY"></strong><small>MP3, M4A, Opus, WAV</small></span>
           </span>
         </label>
       </div>
 
       <div class="format-options" id="video-options">
-        <h3 class="card-title" id="video-format-title">Fájlformátum</h3>
+        <h3 class="card-title" id="video-format-title" data-i18n="FILE_FORMAT"></h3>
         <div class="chips" role="radiogroup" id="container">
           <label><input type="radio" name="container" value="mp4" checked><span>MP4</span></label>
           <label><input type="radio" name="container" value="mkv"><span>MKV</span></label>
@@ -143,19 +159,19 @@
         </div>
         <p class="hint" id="container-hint"></p>
 
-        <h3 class="card-title">Minőség</h3>
+        <h3 class="card-title" data-i18n="QUALITY"></h3>
         <div class="chips" role="radiogroup" id="quality"></div>
         <label class="switch-row" id="compatible-row">
           <span>
-            <strong>Kompatibilis mód</strong>
-            <small>H.264 + AAC: régebbi lejátszókon és tévéken is megy, de legfeljebb 1080p.</small>
+            <strong data-i18n="COMPATIBILITY_MODE"></strong>
+            <small data-i18n="COMPATIBILITY_HINT"></small>
           </span>
           <input type="checkbox" id="compatible" class="switch">
         </label>
       </div>
 
       <div class="format-options" id="audio-options" hidden>
-        <h3 class="card-title" id="audio-format-title">Fájlformátum</h3>
+        <h3 class="card-title" id="audio-format-title" data-i18n="FILE_FORMAT"></h3>
         <div class="chips" role="radiogroup" id="audio-format">
           <label><input type="radio" name="audio_format" value="mp3" checked><span>MP3</span></label>
           <label><input type="radio" name="audio_format" value="m4a"><span>M4A</span></label>
@@ -167,8 +183,8 @@
 
       <label class="switch-row" id="playlist-row" hidden>
         <span>
-          <strong>Teljes lejátszási lista</strong>
-          <small>A videó egy lejátszási listához tartozik. Bekapcsolva a teljes listát letölti, nem csak ezt a videót; elemenként választhatsz videót vagy hangot.</small>
+          <strong data-i18n="ENTIRE_PLAYLIST"></strong>
+          <small data-i18n="ENTIRE_PLAYLIST_HINT"></small>
         </span>
         <input type="checkbox" id="playlist" class="switch">
       </label>
@@ -176,66 +192,66 @@
       <div class="folder-row">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         <span class="folder-path" id="folder" title=""></span>
-        <button type="button" class="btn btn-ghost btn-sm" id="choose-folder">Módosítás</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="open-folder">Megnyitás</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="choose-folder" data-i18n="CHANGE"></button>
+        <button type="button" class="btn btn-ghost btn-sm" id="open-folder" data-i18n="OPEN"></button>
       </div>
     </form>
 
     <section class="action">
       <button class="btn btn-primary" id="download-btn">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v12m0 0-5-5m5 5 5-5M5 20h14"/></svg>
-        <span id="download-label">Letöltés</span>
+        <span id="download-label" data-i18n="DOWNLOAD"></span>
       </button>
     </section>
 
     <section class="card queue" id="queue" hidden>
       <div class="queue-head">
-        <h3 class="card-title">Letöltési sor</h3>
+        <h3 class="card-title" data-i18n="DOWNLOAD_QUEUE"></h3>
         <span class="queue-count" id="queue-count"></span>
-        <button type="button" class="btn btn-ghost btn-sm" id="clear-finished" hidden>Befejezettek törlése</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="clear-finished" hidden data-i18n="CLEAR_FINISHED"></button>
       </div>
       <ul class="queue-list" id="queue-list"></ul>
     </section>
 
     <details class="log">
-      <summary>Részletes napló</summary>
+      <summary data-i18n="DETAILED_LOG"></summary>
       <pre id="log"></pre>
     </details>
 
     <p class="warning-banner" id="tools-warning" hidden></p>
 
     <footer class="footer">
-      <button type="button" class="btn btn-ghost btn-sm" id="updates-open" disabled>Frissítések és újdonságok</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="updates-open" disabled data-i18n="UPDATES_AND_WHAT_S_NEW"></button>
       <small class="muted" id="app-version"></small>
-      <span>Készítette</span>
+      <span data-i18n="CREATED_BY"></span>
       <img src="mm-wordmark.png" alt="MediaMinds – your creative marketing agency">
     </footer>
   </main>
 
   <dialog class="updates-dialog" id="updates-dialog" aria-labelledby="updates-title">
     <div class="updates-head">
-      <div><p class="eyebrow">Mindig naprakészen</p><h2 id="updates-title">Frissítések és újdonságok</h2></div>
-      <button type="button" class="btn btn-ghost btn-icon" id="updates-close" aria-label="Bezárás">✕</button>
+      <div><p class="eyebrow" data-i18n="STAY_UP_TO_DATE"></p><h2 id="updates-title" data-i18n="UPDATES_AND_WHAT_S_NEW"></h2></div>
+      <button type="button" class="btn btn-ghost btn-icon" id="updates-close"  data-i18n-aria-label="CLOSE">✕</button>
     </div>
     <div class="update-summary">
       <span class="version-pill" id="update-current"></span>
       <span class="version-pill version-new" id="update-latest" hidden></span>
     </div>
     <p id="update-status" role="status" aria-live="polite"></p>
-    <progress id="update-progress" max="100" aria-label="Frissítés letöltése" hidden></progress>
+    <progress id="update-progress" max="100"  data-i18n-aria-label="DOWNLOAD_UPDATE" hidden></progress>
     <p class="inline-error" id="update-error" role="alert" hidden></p>
     <section class="release-notes" aria-labelledby="notes-title">
-      <h3 class="card-title" id="notes-title">Kiadási megjegyzések · Patch notes</h3>
+      <h3 class="card-title" id="notes-title" data-i18n="RELEASE_NOTES"></h3>
       <p class="muted" id="release-date"></p>
-      <div id="release-notes">A kiadási megjegyzések az ellenőrzés után jelennek meg.</div>
+      <div id="release-notes" data-i18n="RELEASE_NOTES_PLACEHOLDER"></div>
     </section>
     <div class="updates-actions">
-      <button type="button" class="btn btn-ghost btn-sm" id="update-check">Frissítések keresése</button>
-      <button type="button" class="btn btn-primary" id="update-download" hidden>Frissítés letöltése</button>
-      <button type="button" class="btn btn-primary" id="update-install" hidden>Újraindítás és frissítés</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="update-check" data-i18n="CHECK_FOR_UPDATES"></button>
+      <button type="button" class="btn btn-primary" id="update-download" hidden data-i18n="DOWNLOAD_UPDATE"></button>
+      <button type="button" class="btn btn-primary" id="update-install" hidden data-i18n="RESTART_AND_UPDATE"></button>
     </div>
   </dialog>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

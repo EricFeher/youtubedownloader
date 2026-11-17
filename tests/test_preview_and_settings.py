@@ -174,7 +174,7 @@ def test_settings_roundtrip_ignores_unknown_keys(tmp_path):
 
     loaded = settings.load(path)
 
-    assert loaded == {"output_dir": str(tmp_path), "mode": "audio", "quality": "1080", "compatible": True, "container": "mkv", "audio_format": "opus"}
+    assert loaded == {"language": "system", "output_dir": str(tmp_path), "mode": "audio", "quality": "1080", "compatible": True, "container": "mkv", "audio_format": "opus"}
 
 
 def test_settings_fall_back_to_defaults_when_missing_or_broken(tmp_path):
@@ -192,3 +192,65 @@ def test_settings_replace_deleted_output_dir(tmp_path):
     settings.save({"output_dir": str(tmp_path / "torolt")}, path)
 
     assert settings.load(path)["output_dir"] == str(settings.default_output_dir())
+
+
+@pytest.mark.parametrize("language,expected", [("en", "en"), ("hu", "hu"), ("de", "system"), (None, "system"), ({}, "system")])
+def test_language_is_persisted_and_unsupported_values_fall_back(tmp_path, language, expected):
+    path = tmp_path / "settings.json"
+    settings.save({"language": language}, path)
+    assert settings.load(path)["language"] == expected
+
+
+@pytest.mark.parametrize("locale,expected", [("hu_HU", "hu"), ("hu-HU", "hu"), ("HU-hu", "hu"),
+                                          ("en_US", "en"), ("en-GB", "en"), ("de_DE", "en"), (None, "en")])
+def test_first_launch_uses_system_language_without_pinning_it(tmp_path, monkeypatch, locale, expected):
+    path = tmp_path / "settings.json"
+    monkeypatch.setattr(settings, "system_locale", lambda: locale)
+    loaded = settings.load(path)
+    assert settings.resolve_language(loaded["language"]) == expected
+    settings.save(loaded, path)
+    monkeypatch.setattr(settings, "system_locale", lambda: "hu_HU" if expected == "en" else "en_US")
+    assert settings.resolve_language(settings.load(path)["language"]) != expected
+
+
+@pytest.mark.parametrize("manual", ["hu", "en"])
+def test_saved_language_overrides_system_language(tmp_path, monkeypatch, manual):
+    path = tmp_path / "settings.json"
+    settings.save({"language": manual}, path)
+    monkeypatch.setattr(settings, "system_locale", lambda: "en_US" if manual == "hu" else "hu_HU")
+    assert settings.resolve_language(settings.load(path)["language"]) == manual
+
+
+def test_unavailable_system_locale_uses_english(monkeypatch):
+    monkeypatch.setattr(settings.locale, "getlocale", lambda: (_ for _ in ()).throw(ValueError("no locale")))
+    monkeypatch.setattr(settings.sys, "platform", "linux")
+    for name in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        monkeypatch.delenv(name, raising=False)
+    assert settings.resolve_language("system") == "en"
+
+
+def test_windows_uses_display_language_instead_of_regional_format(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(settings.sys, "platform", "win32")
+    monkeypatch.setattr(settings.ctypes, "windll", SimpleNamespace(
+        kernel32=SimpleNamespace(GetUserDefaultUILanguage=lambda: 0x040E)), raising=False)
+    monkeypatch.setattr(settings.locale, "getlocale", lambda: ("en_US", "UTF-8"))
+    assert settings.resolve_language("system") == "hu"
+
+
+def test_macos_uses_first_preferred_display_language(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(settings.sys, "platform", "darwin")
+    monkeypatch.setattr(settings.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout='(\n "hu-HU",\n "en-US"\n)'))
+    assert settings.resolve_language("system") == "hu"
+
+
+def test_linux_uses_message_locale(monkeypatch):
+    monkeypatch.setattr(settings.sys, "platform", "linux")
+    monkeypatch.delenv("LANGUAGE", raising=False)
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.setenv("LC_MESSAGES", "hu_HU.UTF-8")
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+    assert settings.resolve_language("system") == "hu"

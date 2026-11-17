@@ -36,6 +36,8 @@ Nem kell hozzá szerver: egyetlen program, ami a gépeden fut, de a felülete eg
   Élő adásnál és ismeretlen hosszúságú videónál nincs csúszka.
 - Folyamatjelző sebességgel és hátralévő idővel, megszakítás.
 - Megjegyzi a mentési mappát és az utoljára választott beállításokat.
+- **Magyar és angol felület**: a fejléc alatti **Nyelv / Language** választóval azonnal válthatsz.
+  A választást megjegyzi, és a nyelvváltás megőrzi a letöltési sort, a playlist kijelöléseit és a videóbeállításokat.
 - **Alkalmazásfrissítés**: induláskor és óránként ellenőrzi a GitHub legújabb stabil kiadását.
   Új verziónál zöld értesítés jelenik meg. A lábléc **Frissítések és újdonságok** gombjával bármikor
   ellenőrizhetsz, és az alkalmazásban elolvashatod a kiadási megjegyzéseket (patch notes).
@@ -74,6 +76,20 @@ python -m venv .venv
 ```
 
 macOS-en: `brew install ffmpeg deno`.
+
+### Fordítások
+
+A közös szövegkatalógusok a `ytletolto/web/locales/en.json` és `hu.json` fájlokban vannak.
+Az angol az alapnyelv és a hiányzó fordítások tartaléka; a kulcsok a szöveg megfogalmazásától függetlenek.
+JavaScriptben például `t(TEXT.PASTE)` vagy `setText(node, TEXT.DOWNLOAD_ITEMS, {count: 2})`,
+HTML-ben `data-i18n="PASTE"`, attribútumoknál `data-i18n-aria-label="LANGUAGE"` használható.
+Pythonban ugyanazokat a kulcsokat a `ytletolto.i18n.TEXT` biztosítja, például
+`Message(TEXT.UNEXPECTED_ERROR, error=str(exc))`. A felület a kulcsot és a paramétereket kapja meg,
+így az állapotüzenet futó letöltés közben is újrafordítható. Új szöveget mindkét katalógusba fel kell venni;
+az angol többes szám alakjaihoz `one` és `other` adható meg.
+Első indításkor a rendszer megjelenítési nyelve érvényesül; nem támogatott nyelvnél angolra vált.
+A `language: "system"` beállítás követi a rendszert, a kézi `hu` vagy `en` választást megjegyzi.
+A videócímek, fájlnevek, külső technikai naplók és a kiadó által írt kiadási megjegyzések a forrásuk nyelvén maradnak.
 
 ## Futtatható állomány készítése
 

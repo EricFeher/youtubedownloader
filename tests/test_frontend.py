@@ -1,5 +1,6 @@
 """A valódi HTML/CSS/JS felület tesztjei, helyi pywebview API-helyettessel."""
 
+import json
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -24,7 +25,7 @@ window.videoData = {
     qualities:{mp4:[quality(720),quality(480)],mkv:[quality(720)],webm:[quality(720)]}}
 };
 window.pywebview = {api: {
-  init:async()=>({settings:{output_dir:'/downloads',mode:'video',quality:'best',container:'mp4',audio_format:'mp3',compatible:false},
+  init:async()=>({settings:{language:window.testLanguage ?? 'hu',output_dir:'/downloads',mode:'video',quality:'best',container:'mp4',audio_format:'mp3',compatible:false},
     ffmpeg:true,js_runtime:true,queue:{version:0,items:[]},update:window.updateData}),
   check_update:async()=>{window.updateCalls.push('check');return window.updateData;},
   download_update:async()=>{window.updateCalls.push('download');return {...window.updateData,status:'ready',progress:100};},
@@ -81,8 +82,238 @@ def page(browser, web_server):
     assert errors == []
 
 
+def set_language(page, language):
+    page.locator("#language").click()
+    page.locator(f'[data-language="{language}"]').click()
+
+
+@pytest.mark.parametrize("bridge", ["undefined", "{api: {}}", "{api: {init: true}}"])
+def test_initialization_waits_for_callable_bridge(browser, web_server, bridge):
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.add_init_script(API + """
+      window.readyApi = window.pywebview.api;
+      window.initCalls = 0;
+      const originalInit = window.readyApi.init;
+      window.readyApi.init = () => { window.initCalls++; return originalInit(); };
+      window.pywebview = """ + bridge + ";")
+    try:
+        page.goto(web_server)
+        page.wait_for_function("window.app !== undefined")
+        page.evaluate("window.dispatchEvent(new Event('pywebviewready'))")
+        expect(page.locator("#language")).to_be_disabled()
+        assert page.evaluate("window.initCalls") == 0
+        page.evaluate("""window.pywebview = {api: window.readyApi};
+          window.dispatchEvent(new Event('pywebviewready'));""")
+        expect(page.locator("#folder")).to_have_text("\u200e/downloads\u200e")
+        page.evaluate("window.dispatchEvent(new Event('pywebviewready'))")
+        assert page.evaluate("window.initCalls") == 1
+        assert page.evaluate("window.updateCalls") == ["check"]
+        assert errors == []
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("failure", ["throw new Error('Bridge unavailable');", "return Promise.reject(new Error('Bridge unavailable'));"])
+def test_initialization_failure_allows_retry_without_overlapping_calls(browser, web_server, failure):
+    page = browser.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.add_init_script(API + """
+      window.initCalls = 0;
+      const originalInit = window.pywebview.api.init;
+      window.pywebview.api.init = () => {
+        window.initCalls++;
+        if (window.initCalls === 1) { """ + failure + """ }
+        return new Promise(resolve => { window.resolveInit = () => resolve(originalInit()); });
+      };
+    """)
+    try:
+        page.goto(web_server)
+        page.wait_for_function("window.initCalls === 1")
+        expect(page.locator("#language")).to_be_disabled()
+        page.evaluate("""window.dispatchEvent(new Event('pywebviewready'));
+          window.dispatchEvent(new Event('pywebviewready'));""")
+        assert page.evaluate("window.initCalls") == 2
+        expect(page.locator("#language")).to_be_disabled()
+        page.evaluate("window.resolveInit()")
+        expect(page.locator("#folder")).to_have_text("\u200e/downloads\u200e")
+        expect(page.locator("#language")).to_be_enabled()
+        page.evaluate("window.dispatchEvent(new Event('pywebviewready'))")
+        assert page.evaluate("window.initCalls") == 2
+        assert page.evaluate("window.updateCalls") == ["check"]
+        assert errors == []
+    finally:
+        page.close()
+
+
+def test_missing_translation_falls_back_to_english_catalog(page):
+    hungarian = json.loads((WEB / "locales" / "hu.json").read_text(encoding="utf-8"))
+    del hungarian["PASTE"]
+    page.route("**/locales/hu.json", lambda route: route.fulfill(json=hungarian))
+    page.reload()
+    expect(page.locator("html")).to_have_attribute("lang", "hu")
+    expect(page.locator("#paste-btn")).to_have_text("Paste")
+    expect(page.locator("#download-label")).to_have_text("MP4 letöltése")
+    assert page.evaluate("Object.isFrozen(window.i18n.TEXT)")
+    assert page.evaluate("window.i18n.t('External error: file {title}.mp4')") == "External error: file {title}.mp4"
+
+
+def test_language_menu_shows_flags_full_names_and_current_selection(page):
+    trigger = page.locator("#language")
+    menu = page.locator("#language-menu")
+    expect(menu).to_be_hidden()
+    expect(page.locator("#language-code")).to_have_text("HU")
+    trigger.click()
+    expect(trigger).to_have_attribute("aria-expanded", "true")
+    expect(menu.get_by_role("menuitemradio")).to_have_count(2)
+    expect(menu.get_by_role("menuitemradio", name="Magyar")).to_have_attribute("aria-checked", "true")
+    expect(menu.get_by_role("menuitemradio", name="English")).to_be_visible()
+    assert menu.locator("img").evaluate_all("images => images.every(img => img.complete && img.naturalWidth > 0)")
+    menu.get_by_role("menuitemradio", name="English").click()
+    expect(menu).to_be_hidden()
+    expect(trigger).to_be_focused()
+    expect(page.locator("#language-code")).to_have_text("EN")
+    expect(page.locator("#language-flag")).to_have_attribute("src", "flags/en.svg")
+    assert page.evaluate("window.recorded.saved") == [{"language": "en"}]
+    trigger.click()
+    expect(menu.get_by_role("menuitemradio", name="English")).to_have_attribute("aria-checked", "true")
+    page.locator("#url").click()
+    expect(menu).to_be_hidden()
+    expect(trigger).to_have_attribute("aria-expanded", "false")
+
+
+def test_language_menu_keyboard_navigation_and_dismissal(page):
+    trigger = page.locator("#language")
+    menu = page.locator("#language-menu")
+    trigger.focus()
+    page.keyboard.press("ArrowDown")
+    expect(menu.get_by_role("menuitemradio", name="Magyar")).to_be_focused()
+    page.keyboard.press("End")
+    expect(menu.get_by_role("menuitemradio", name="English")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(menu).to_be_hidden()
+    expect(trigger).to_be_focused()
+    assert page.evaluate("window.recorded.saved") == []
+    page.keyboard.press("Enter")
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("Enter")
+    expect(page.locator("#language-code")).to_have_text("EN")
+    expect(menu).to_be_hidden()
+    trigger.click()
+    page.keyboard.press("Tab")
+    expect(menu).to_be_hidden()
+
+
 def set_range(page, side, seconds):
     page.locator(f"#range-{side}").evaluate("(input,value)=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}", seconds)
+
+
+def test_language_switch_translates_controls_and_preserves_video_settings(page):
+    page.locator("#url").fill("https://youtu.be/one")
+    expect(page.locator("#range-section")).to_be_visible()
+    set_range(page, "start", 20)
+    set_range(page, "end", 90)
+    page.locator('#quality label:has(input[value="720"])').click()
+    set_language(page, "en")
+    expect(page.locator("html")).to_have_attribute("lang", "en")
+    expect(page.locator("#paste-btn")).to_have_text("Paste")
+    expect(page.locator("#url")).to_have_attribute("placeholder", "Paste one or more YouTube links…")
+    expect(page.locator("#range-start")).to_have_attribute("aria-label", "Section start")
+    expect(page.locator("#range-summary")).to_have_text("Selected duration: 1:10")
+    expect(page.locator("#container-hint")).to_contain_text("Plays anywhere")
+    expect(page.locator("#quality")).to_contain_text("Best")
+    expect(page.locator("#download-label")).to_have_text("Download MP4")
+    expect(page.locator("#range-start")).to_have_value("20")
+    expect(page.locator('#quality input[value="720"]')).to_be_checked()
+    expect(page.locator("#title")).to_have_text("Első videó")
+    assert page.evaluate("window.recorded.saved.at(-1)") == {"language": "en"}
+    set_language(page, "hu")
+    expect(page.locator("#range-summary")).to_have_text("Kijelölt hossz: 1:10")
+    expect(page.locator("#paste-btn")).to_have_text("Beillesztés")
+
+
+def test_saved_english_language_is_used_on_startup(page):
+    page.add_init_script("window.testLanguage='en'")
+    page.reload()
+    page.evaluate("window.dispatchEvent(new Event('pywebviewready'))")
+    expect(page.locator("#language")).to_have_attribute("value", "en")
+    expect(page.locator("#download-label")).to_have_text("Download MP4")
+    page.locator("#updates-open").click()
+    expect(page.locator("#updates-title")).to_have_text("Updates and what's new")
+    expect(page.locator("#update-status")).to_have_text("You are using the latest version.")
+    expect(page.locator("#release-date")).to_contain_text("November")
+    expect(page.locator("#release-notes")).to_contain_text("Stabilabb letöltések")
+
+
+def test_language_switch_keeps_playlist_selection_editor_and_ranges(page):
+    page.locator("#url").fill("https://www.youtube.com/playlist?list=PL1")
+    expect(page.locator("#playlist-items .playlist-item")).to_have_count(3)
+    page.locator('.playlist-item[data-index="2"] .playlist-open').click()
+    expect(page.locator("#editor-title")).to_have_text("Második videó")
+    set_range(page, "start", 30)
+    page.locator('.playlist-item[data-index="3"] .playlist-select').uncheck()
+    page.locator('#mode-grid label:has(input[value="audio"])').click()
+    set_language(page, "en")
+    expect(page.locator("#playlist-summary")).to_have_text("2 / 3 items selected · 1 video, 1 audio")
+    expect(page.locator('.playlist-item[data-index="3"] .playlist-select')).not_to_be_checked()
+    expect(page.locator('.playlist-item[data-index="2"] button[data-mode="audio"]')).to_have_attribute("aria-pressed", "true")
+    expect(page.locator('.playlist-item[data-index="2"] .playlist-open')).to_have_attribute("aria-current", "true")
+    expect(page.locator("#range-start")).to_have_value("30")
+    expect(page.locator("#editor-title")).to_have_text("Második videó")
+    expect(page.locator("#preview-kind")).to_have_text("Playlist · 3 videos")
+
+
+def test_running_queue_progress_errors_and_backend_templates_change_language(page):
+    page.evaluate("""window.app.onEvent({type:'queue',version:1,items:[
+      {id:1,state:'running',title:'Kész',mode:'video',container:'mp4',files:[]},
+      {id:2,state:'failed',title:'Video {error}',mode:'audio',audio_format:'mp3',files:[],message:{message:'UNEXPECTED_ERROR',params:{error:'Disk {name} full'}}}
+    ]});
+    window.app.onEvent({type:'progress',id:1,percent:42,speed:1024,eta:30});""")
+    set_language(page, "en")
+    expect(page.locator('.q-item[data-id="1"] .q-status')).to_contain_text("Downloading video track")
+    expect(page.locator('.q-item[data-id="1"] .q-status')).to_contain_text("0:30 remaining")
+    expect(page.locator('.q-item[data-id="1"] .q-pct')).to_have_text("42%")
+    expect(page.locator('.q-item[data-id="1"] .q-title')).to_have_text("Kész")
+    expect(page.locator('.q-item[data-id="2"] .q-status')).to_have_text("Unexpected error: Disk {name} full")
+    expect(page.locator('.q-item[data-id="2"] .q-actions')).to_contain_text("Retry")
+    expect(page.locator("#log")).to_contain_text("Video {error}: Unexpected error: Disk {name} full")
+    assert page.locator("#log > div").count() == 2
+    page.evaluate("window.app.onEvent({type:'status',id:1,text:{message:'PREPARING_AUDIO_ITEMS',params:{count:2}}})")
+    expect(page.locator('.q-item[data-id="1"] .q-status')).to_have_text("Preparing 2 items as audio…")
+    set_language(page, "hu")
+    expect(page.locator('.q-item[data-id="1"] .q-status')).to_have_text("2 elem előkészítése hangként…")
+    assert page.locator("#log > div").count() == 2
+
+
+def test_language_switch_preserves_pending_cancel_and_update_failure(page):
+    page.evaluate("""window.pywebview.api.cancel=async()=>true;
+    window.app.onEvent({type:'queue',version:1,items:[{id:1,state:'running',title:'Video',mode:'video',container:'mp4',files:[]}]});""")
+    page.locator('.q-item .q-actions button').click()
+    set_language(page, "en")
+    expect(page.locator('.q-item .q-actions button')).to_be_disabled()
+    expect(page.locator('.q-item .q-actions button')).to_have_text("Cancelling…")
+    page.evaluate("""window.app.onEvent({type:'queue',version:2,items:[]});
+    window.pywebview.api.install_update=async()=>({ok:false,error:{message:'APP_WINDOW_UNAVAILABLE',params:{}}});
+    window.app.onUpdate({...window.updateData,status:'ready',available:true,version:'1.2.0'});""")
+    page.locator("#updates-open").click()
+    page.locator("#update-install").click()
+    expect(page.locator("#update-error")).to_have_text("The application window is unavailable.")
+    page.locator("#updates-close").click()
+    set_language(page, "hu")
+    page.locator("#updates-open").click()
+    expect(page.locator("#update-error")).to_be_visible()
+    expect(page.locator("#update-error")).to_have_text("Az alkalmazás ablaka nem érhető el.")
+
+
+def test_english_plural_forms_and_safe_parameter_substitution(page):
+    set_language(page, "en")
+    assert page.evaluate("""[window.i18n.t(window.i18n.TEXT.DOWNLOAD_ITEMS,{count:1}),
+      window.i18n.t(window.i18n.TEXT.DOWNLOAD_ITEMS,{count:2}),
+      window.i18n.t(window.i18n.TEXT.SELECT_VIDEO,{title:'<b>{title}</b>'})]""") == [
+        "Download 1 item", "Download 2 items", "Select <b>{title}</b> for download",
+    ]
 
 
 def test_updates_auto_check_notes_dialog_keyboard_and_safe_text(page):

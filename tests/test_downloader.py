@@ -291,7 +291,7 @@ def test_run_downloads_video_and_audio_items_by_id(monkeypatch, tmp_path):
     assert "FFmpegExtractAudio" in pp_keys(FakeYDL.runs[1])
     progress = [(e.item, e.mode) for e in events if isinstance(e, Progress)]
     assert progress == [("1/3", "video")] * 2 + [("2/3", "video")] * 2 + [("3/3", "audio")] * 2
-    assert events[-1] == Finished(True, "Kész!", ("/out/a", "/out/c", "/out/b"))
+    assert events[-1] == Finished(True, "Done!", ("/out/a", "/out/c", "/out/b"))
 
 
 def test_cancel_stops_while_skipping_unselected_items(monkeypatch, tmp_path):
@@ -306,7 +306,7 @@ def test_cancel_stops_while_skipping_unselected_items(monkeypatch, tmp_path):
     downloader.run(*requests)
 
     assert not any(isinstance(e, Progress) for e in events)
-    assert events[-1] == Finished(False, "Letöltés megszakítva.", ())
+    assert events[-1] == Finished(False, "Download cancelled.", ())
 
 
 def test_single_mode_selection_skips_other_playlist_items(monkeypatch, tmp_path):
@@ -318,4 +318,4 @@ def test_single_mode_selection_skips_other_playlist_items(monkeypatch, tmp_path)
 
     Downloader(events.append, TOOLS).run(*requests)
 
-    assert events[-1] == Finished(True, "Kész!", ("/out/b",))
+    assert events[-1] == Finished(True, "Done!", ("/out/b",))
